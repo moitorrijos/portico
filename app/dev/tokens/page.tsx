@@ -120,7 +120,7 @@ export default function TokensPage() {
         </ul>
       </Section>
 
-      <Section eyebrow="Type" title="Be Vietnam Pro — everything functional">
+      <Section eyebrow="Type" title="Plus Jakarta Sans — everything functional">
         <div className="space-y-base border-y border-rule py-base">
           <Specimen size="text-title" note="24px · in-app section heads">
             Occupancy by community
@@ -164,7 +164,7 @@ export default function TokensPage() {
         <p className="mb-base max-w-prose text-ink-2">
           The hero occupancy figure is the only Playfair inside the manager app,
           and the only number allowed proportional figures. Everything under it
-          is Be Vietnam Pro.
+          is Plus Jakarta Sans.
         </p>
         <div className="border-y border-rule py-loose">
           <p className="eyebrow mb-tight">Occupancy</p>

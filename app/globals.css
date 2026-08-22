@@ -111,12 +111,14 @@
 
   /* Two families, two weights each (400/500). No bold anywhere: §7 wants
      hierarchy from size and spacing, not weight and colour. */
-  --font-sans:    var(--font-be-vietnam), ui-sans-serif, system-ui, sans-serif;
+  --font-sans:    var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
   --font-display: var(--font-playfair), ui-serif, Georgia, serif;
 
-  /* Be Vietnam Pro carries everything functional -- all UI, all data, all
-     numbers. Four sizes, chosen for dense tables first and marketing body
-     second, because the dense case is the one that breaks. */
+  /* Plus Jakarta Sans carries everything functional -- all UI, all data, all
+     numbers. It has real tabular figures, which is the whole reason it owns
+     the data (see app/layout.tsx). Four sizes, chosen for dense tables first
+     and marketing body second, because the dense case is the one that
+     breaks. */
   --text-caption:               0.75rem;   /* 12px — axis ticks, table meta */
   --text-caption--line-height:  1.4;
   --text-body:                  0.875rem;  /* 14px — UI default, table cells */

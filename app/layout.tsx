@@ -1,14 +1,22 @@
 import type { Metadata } from "next";
-import { Be_Vietnam_Pro, Playfair_Display } from "next/font/google";
+import { Playfair_Display, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 
-/* Be Vietnam Pro carries everything functional: all UI, every table column,
-   axis ticks, form labels, body copy. Two weights only -- §7 wants hierarchy
-   from size and spacing, not weight. */
-const sans = Be_Vietnam_Pro({
+/* Plus Jakarta Sans carries everything functional: all UI, every table column,
+   axis ticks, form labels, body copy.
+
+   Chosen over Be Vietnam Pro for one measured reason: Be Vietnam Pro has no
+   tabular figures at all. Its "1" measures 12.3px against "4" at 22.7px at
+   32px, and font-variant-numeric has literally no effect on it -- so ledger
+   decimals never line up. §8 requires tabular figures on table columns and
+   axis ticks, and a wandering decimal is the most visible way a data table
+   looks unfinished. Plus Jakarta Sans is the closest face in character
+   (geometric, warm, similar proportions) that actually has them.
+
+   Variable font, so no weight array -- the axis covers the 400/500 we use. */
+const sans = Plus_Jakarta_Sans({
   subsets: ["latin"],
-  weight: ["400", "500"],
-  variable: "--font-be-vietnam",
+  variable: "--font-jakarta",
   display: "swap",
 });
 
