@@ -24,6 +24,23 @@ push
 
 ---
 
+## Where this stands
+
+| Section | State |
+|---|---|
+| A–C · VPS, hardening, Dokku | ⬜ not started — being provisioned |
+| D · DNS (two records) | ⬜ not started |
+| E · Apps, Postgres, storage, config | ⬜ not started |
+| **F · GitHub repo, Actions, protection** | ✅ **done** except making the GHCR package public |
+| G · Deploy key and secrets | ⬜ not started — `DOKKU_HOST` and `DOKKU_SSH_PRIVATE_KEY` confirmed empty in CI |
+| H · First deploys and TLS | ⬜ blocked on A–E and G |
+| I · Nightly reset | ⬜ blocked on Phase 1 code |
+| J · Ongoing | ⬜ after H |
+| K · Asset sourcing | ⬜ parallel, blocks nothing |
+| L · Staging lockdown | ⬜ after H1 |
+
+**CI is green through `build`.** The `Deploy to staging` job fails on every push, which is correct and expected — the log shows `DOKKU_HOST:` and `SSH_KEY:` empty. It will stay red until G is done, and that is a signal, not noise to suppress.
+
 ## Ordering at a glance
 
 Sections **A → B → C** are strictly sequential. **D (DNS)** can run in parallel but must resolve before TLS. **F/G** are independent of the server work and can be done first. **E must precede H**; **H must precede I**. **L (staging lockdown) must follow H.** **K is fully parallel** and blocks nothing but seed quality.
@@ -195,33 +212,45 @@ Run the whole section **twice** — once per environment. The two apps are ident
 
 ---
 
-## F. GitHub repo and container registry
+## F. GitHub repo and container registry ✅ mostly done
 
-- [ ] Create the repo. There is currently **no remote** and one local commit on `main`.
-- [ ] Repo is **public** — free Actions minutes, free GHCR, anonymous image pull from the VPS, and readable source is part of the pitch. Before pushing, confirm nothing sensitive is committed.
-- [ ] ⚠️ `.gitignore` ignores `.env*` wholesale, so a committed `.env.example` needs a `!.env.example` negation line added.
-      ```sh
-      git remote add origin git@github.com:<user>/portico.git
-      git push -u origin main
-      ```
-- [ ] **Create the `develop` branch** and push it — the staging job never runs without it:
-      ```sh
-      git checkout -b develop && git push -u origin develop
-      ```
-- [ ] Consider making `develop` the repo's default branch, so PRs target it rather than `main` by accident.
-- [ ] Enable GitHub Actions if it's disabled by default.
-- [ ] **Make the GHCR package public** once the first image is pushed (Package settings → Change visibility). This lets both apps pull anonymously and **skips `registry:login` entirely** — there's nothing secret in a demo image.
+**Repo is live at <https://github.com/moitorrijos/portico>** — public, default branch `develop`.
 
-      If you'd rather keep it private, run on the VPS instead:
+- [x] Repo created as `moitorrijos/portico`, **public** — free Actions minutes, free GHCR, anonymous image pull from the VPS.
+- [x] `origin` remote added over **SSH** (`git@github.com:moitorrijos/portico.git`). SSH matters: the `gh` token carries `gist`, `read:org`, `repo` but **not** `workflow`, and pushing `.github/workflows/` over HTTPS with such a token is rejected. Over SSH the restriction doesn't apply.
+- [x] `main` and `develop` both pushed.
+- [x] `develop` set as the **default branch**, so PRs target it rather than production by accident.
+- [x] GitHub Actions enabled and running. Pipeline is green through `build`: `Lint, typecheck, test` ~15s, `Build and push image` ~1m, images landing at `ghcr.io/moitorrijos/portico:<sha>`.
+- [x] **Both branches protected** — PRs required, `Lint, typecheck, test` must pass, no direct pushes, no force-pushes, no deletions, **admin bypass off**.
+
+      Required approvals is deliberately **0**: you cannot approve your own PR, so requiring 1 would deadlock every merge.
+
+      ⚠️ **Escape hatch.** With admin bypass off, broken CI blocks *every* merge including the fix. To recover:
       ```sh
-      dokku registry:login --global ghcr.io <github-username> <PAT-with-read:packages>
+      gh api -X DELETE repos/moitorrijos/portico/branches/develop/protection
+      # fix, merge, then re-apply the protection payload
       ```
-- [ ] Optional: **GitHub Environments.** The workflow declares `staging` and `production`; adding a required reviewer on `production` under Settings → Environments gives you a manual gate on release without editing any YAML.
-- [ ] Optional: branch protection on `main` if you want the CI gate enforced rather than advisory.
+- [x] Merge settings: squash-only (merge commits disabled), rebase allowed, **merged branches auto-delete**.
+- [x] Branch and commit conventions documented in `AGENTS.md`, below the `BEGIN/END:nextjs-agent-rules` markers that `next dev` rewrites.
+
+### Still to do in this section
+
+- [ ] ⚠️ **Make the GHCR package public** — Settings → Packages → `portico` → Change visibility → Public.
+
+      **This blocks the VPS from pulling.** GHCR packages are private by default even in a public repo, so `git:from-image` will fail with an auth error until this is flipped. I can't verify or change it from here — the token lacks `read:packages`.
+
+      If you'd rather keep it private, run this on the VPS instead:
+      ```sh
+      dokku registry:login --global ghcr.io moitorrijos <PAT-with-read:packages>
+      ```
+- [ ] Optional: **GitHub Environments.** `staging` was created automatically by the first run; `production` appears after the first `main` deploy. Adding a required reviewer on `production` under Settings → Environments gives you a manual release gate without touching any YAML.
+- [ ] Deferred: `.gitignore` ignores `.env*` wholesale, so a committed `.env.example` will need a `!.env.example` negation line. Nothing to commit yet — do this when the first env var appears in Phase 1.
 
 ---
 
 ## G. Deploy key and Actions secrets
+
+> **This section is what is currently failing CI.** Every push runs `Deploy to staging`, which exits 1 because `DOKKU_HOST` and `SSH_KEY` resolve to empty strings. Expected until the VPS exists.
 
 The workflow SSHes in and runs one Dokku command per environment. Authenticate **as the `dokku` user** — its shell is restricted to Dokku subcommands, so a leaked key can't get a root prompt. **One key serves both environments.**
 
