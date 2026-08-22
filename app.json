@@ -1,0 +1,15 @@
+{
+  "healthchecks": {
+    "web": [
+      {
+        "type": "startup",
+        "name": "web check",
+        "description": "Checks that the app answers /api/health before shifting traffic",
+        "path": "/api/health",
+        "attempts": 5,
+        "initialDelay": 5,
+        "timeout": 10
+      }
+    ]
+  }
+}

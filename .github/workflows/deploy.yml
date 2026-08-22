@@ -1,0 +1,193 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+# A second push to the same branch should supersede an in-flight deploy, not
+# race it. Keyed on ref so main and develop never block each other.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  check:
+    name: Lint, typecheck, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # pnpm must be installed before setup-node, or `cache: pnpm` has no
+      # store path to resolve. Version comes from package.json packageManager.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      # --if-present so this is a no-op until the authorization suite lands in
+      # Phase 1, rather than a red X on every run until then.
+      - run: pnpm run --if-present test
+
+  build:
+    name: Build and push image
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # GHCR rejects uppercase image paths, and github.repository preserves the
+      # owner's casing -- so normalise rather than assume.
+      - name: Resolve image tag
+        id: meta
+        run: |
+          IMAGE=$(echo "${{ env.REGISTRY }}/${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "image=${IMAGE}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.image }}
+          build-args: GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  # The image is environment-agnostic on purpose: staging and production run the
+  # same artifact and differ only in Dokku config (APP_ENV, DATABASE_URL,
+  # domain). That is what makes staging a real rehearsal rather than a
+  # look-alike. Never bake an environment into the image via NEXT_PUBLIC_*.
+  # ---------------------------------------------------------------------------
+
+  deploy-staging:
+    name: Deploy to staging
+    needs: build
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging-portico.frontendjuan.com
+    steps:
+      - name: Deploy
+        env:
+          DOKKU_HOST: ${{ secrets.DOKKU_HOST }}
+          SSH_KEY: ${{ secrets.DOKKU_SSH_PRIVATE_KEY }}
+          IMAGE: ${{ needs.build.outputs.image }}
+          DOKKU_APP: portico-staging
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # Pin the host key rather than disabling verification.
+          ssh-keyscan -H "$DOKKU_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh "dokku@$DOKKU_HOST" git:from-image "$DOKKU_APP" "$IMAGE"
+
+      - name: Verify staging is not indexable
+        env:
+          # Optional. Set this secret to "user:password" if the staging app is
+          # behind dokku http-auth (recommended -- it is the only layer that
+          # actually stops non-compliant AI crawlers). Without it, these checks
+          # would just read 401 pages.
+          STAGING_BASIC_AUTH: ${{ secrets.STAGING_BASIC_AUTH }}
+        run: |
+          set -euo pipefail
+          URL=https://staging-portico.frontendjuan.com
+
+          # A wrapper rather than an array: empty-array expansion under `set -u`
+          # errors on bash < 4.4, and this stays correct on any version.
+          fetch() {
+            if [ -n "${STAGING_BASIC_AUTH:-}" ]; then
+              curl -u "$STAGING_BASIC_AUTH" "$@"
+            else
+              curl "$@"
+            fi
+          }
+          [ -n "${STAGING_BASIC_AUTH:-}" ] && echo "Using basic auth for staging checks."
+
+          # Give the container a moment to finish the swap.
+          for i in $(seq 1 30); do
+            fetch -sfo /dev/null "$URL/api/health" && break || sleep 2
+          done
+
+          echo "--- X-Robots-Tag on / ---"
+          HEADER=$(fetch -sSI "$URL/" | tr -d '\r' | grep -i '^x-robots-tag:' || true)
+          echo "${HEADER:-<none>}"
+          case "$HEADER" in
+            *noindex*) echo "OK: staging root is noindex" ;;
+            *) echo "FAIL: staging root is missing a noindex X-Robots-Tag." \
+                    "Check APP_ENV on the portico-staging app -- it must NOT be 'production'." >&2
+               exit 1 ;;
+          esac
+
+          echo "--- robots.txt ---"
+          BODY=$(fetch -sS "$URL/robots.txt")
+          echo "$BODY"
+          echo "$BODY" | grep -q 'Disallow: /' \
+            || { echo "FAIL: staging robots.txt does not disallow crawling" >&2; exit 1; }
+
+  deploy-production:
+    name: Deploy to production
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://portico.frontendjuan.com
+    steps:
+      - name: Deploy
+        env:
+          DOKKU_HOST: ${{ secrets.DOKKU_HOST }}
+          SSH_KEY: ${{ secrets.DOKKU_SSH_PRIVATE_KEY }}
+          IMAGE: ${{ needs.build.outputs.image }}
+          DOKKU_APP: portico
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$DOKKU_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh "dokku@$DOKKU_HOST" git:from-image "$DOKKU_APP" "$IMAGE"
+
+      - name: Verify production indexability is correct
+        run: |
+          set -euo pipefail
+          URL=https://portico.frontendjuan.com
+          for i in $(seq 1 30); do
+            curl -sfo /dev/null "$URL/api/health" && break || sleep 2
+          done
+
+          # Marketing must be indexable -- a stray noindex here would quietly
+          # deindex the site, which is the failure nobody notices for weeks.
+          echo "--- / (expect NO noindex) ---"
+          ROOT=$(curl -sSI "$URL/" | tr -d '\r' | grep -i '^x-robots-tag:' || true)
+          echo "${ROOT:-<none, correct>}"
+          case "$ROOT" in
+            *noindex*) echo "FAIL: production marketing page is noindex." \
+                            "APP_ENV is probably not set to 'production'." >&2
+                       exit 1 ;;
+          esac
+
+          # The authenticated trees must NOT be indexable.
+          echo "--- /app (expect noindex) ---"
+          APPH=$(curl -sSI "$URL/app" | tr -d '\r' | grep -i '^x-robots-tag:' || true)
+          echo "${APPH:-<none>}"
+          case "$APPH" in
+            *noindex*) echo "OK: /app is noindex" ;;
+            *) echo "FAIL: /app is missing a noindex X-Robots-Tag" >&2; exit 1 ;;
+          esac
