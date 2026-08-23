@@ -203,6 +203,6 @@ ssh dokku@HOST git:from-image portico ghcr.io/<owner>/portico:<sha-currently-on-
 
 **Logs:** `dokku logs portico -t` · `dokku logs portico-staging -t`
 
-**Disk:** `docker system prune -af` monthly. Two apps plus two Postgres services fill a 40 GB volume with old layers noticeably faster than one.
+**Disk:** `docker system prune -af` monthly. Two apps plus two Postgres services accumulate old image layers noticeably faster than one.
 
 **No database backups.** The data is seeded and truncated nightly by design — backing it up would be theatre. Deliberate, not an oversight.

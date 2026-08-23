@@ -63,7 +63,7 @@ Because builds happen in GitHub Actions and the VPS only *pulls* finished images
 
 That lands around **1.3 GB steady with ~250 MB of spike**. Dokku's stated floor is 1 GB plus swap, which is not enough here. **4 GB is the right size** — comfortable for the steady state with room for the swap window, but not so lavish that the swapfile in section B stops mattering.
 
-> **Decided: Hetzner Cloud `CX23`, Helsinki (`hel1`)** — 2 vCPU / 4 GB NVMe, **$6.49/mo**, Ubuntu 24.04.
+> **Decided: Hetzner Cloud `CX23`, Helsinki (`hel1`)** — 2 vCPU, 4 GB RAM, **$6.49/mo**, Ubuntu 24.04.
 
 - [ ] Create the server: plan **`CX23`**, location **Helsinki**, image **Ubuntu 24.04**.
 - [ ] ⚠️ **Keep to the `CX` line, not `CAX`.** `CX` is x86 (Intel/AMD shared vCPU), which is what the existing Dockerfile and Actions workflow already build for. The cheaper Arm64 **`CAX`** plans would require an arm64 image build and a matching Prisma query-engine target — real work, for no benefit here.
@@ -374,7 +374,7 @@ Do **staging first.** That's the entire point of having it — find the broken S
 - [ ] **Uptime monitoring** — a free UptimeRobot or Better Stack check on the **production** marketing page. This link goes in proposals; you want to know it's down before a prospect tells you. Don't monitor staging; it'll page you for nothing.
 - [ ] **No database backups.** The data is seeded and truncated nightly by design — backing it up would be theatre. Deliberate, not an oversight.
 - [ ] Verify Let's Encrypt auto-renewal fires at ~60 days for **both** domains: `dokku letsencrypt:list`.
-- [ ] `docker system prune -af` monthly. Two apps plus two Postgres services fill a 40 GB volume with old layers noticeably faster than one — consider a cron.
+- [ ] `docker system prune -af` monthly. Two apps plus two Postgres services accumulate old image layers noticeably faster than one — consider a cron.
 - [ ] Watch the first few deploys for OOM in `dmesg`. If swap gets hammered with both apps up, resize one tier.
 - [ ] Periodically re-check that staging is still 401ing and still `noindex` — it's the kind of thing that silently regresses after a config change.
 
