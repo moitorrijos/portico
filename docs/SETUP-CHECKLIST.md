@@ -61,20 +61,20 @@ Because builds happen in GitHub Actions and the VPS only *pulls* finished images
 | Docker + Dokku overhead | ~300 MB |
 | **A second container, briefly, during every zero-downtime swap** | + one app's worth |
 
-That lands around **1.3 GB steady with ~250 MB of spike**. Dokku's stated floor is 1 GB plus swap, which is not enough here. 4 GB would be adequate; the plan chosen below has 8 GB, so memory headroom is simply not a concern.
+That lands around **1.3 GB steady with ~250 MB of spike**. Dokku's stated floor is 1 GB plus swap, which is not enough here. **4 GB is the right size** — comfortable for the steady state with room for the swap window, but not so lavish that the swapfile in section B stops mattering.
 
-> **Decided: Hetzner Cloud `CX23`, Helsinki (`hel1`)** — 2 vCPU / 8 GB / 80 GB NVMe, **$4.49/mo**, Ubuntu 24.04.
+> **Decided: Hetzner Cloud `CX23`, Helsinki (`hel1`)** — 2 vCPU / 4 GB NVMe, **$6.49/mo**, Ubuntu 24.04.
 
 - [ ] Create the server: plan **`CX23`**, location **Helsinki**, image **Ubuntu 24.04**.
 - [ ] ⚠️ **Keep to the `CX` line, not `CAX`.** `CX` is x86 (Intel/AMD shared vCPU), which is what the existing Dockerfile and Actions workflow already build for. The cheaper Arm64 **`CAX`** plans would require an arm64 image build and a matching Prisma query-engine target — real work, for no benefit here.
 - [ ] Add your SSH public key during creation. **Do not choose password auth.**
 - [ ] Note the IPv4 address; enable IPv6 if offered.
 
-**On the EU location.** Helsinki costs ~100–120 ms extra round-trip for US viewers. For mostly server-rendered pages that shows up as a slightly slower first paint and nothing else — there is no chatty client-side fetching in this app to multiply the penalty. The price and the 8 GB are worth more than the latency.
+**On the EU location.** Helsinki costs ~100–120 ms extra round-trip for US viewers. For mostly server-rendered pages that shows up as a slightly slower first paint and nothing else — there is no chatty client-side fetching in this app to multiply the penalty. The price is worth more than the latency here.
 
 If it ever does start to bother you, putting Cloudflare in front caches the static marketing pages at the edge, which is the surface a prospect judges first. Not needed to launch, and not worth doing pre-emptively.
 
-**Alternatives, for the record.** DigitalOcean's 4 GB droplet (~$24/mo) has a **Dokku 1-Click image** that skips section C entirely — more than five times the price, in the same currency, to save one command. Vultr and Linode/Akamai are fine. **Avoid Contabo** — heavily oversubscribed, and this is a server you will be showing to paying prospects.
+**Alternatives, for the record.** DigitalOcean's 4 GB droplet (~$24/mo) has a **Dokku 1-Click image** that skips section C entirely — nearly four times the price to save one command. Vultr and Linode/Akamai are fine. **Avoid Contabo** — heavily oversubscribed, and this is a server you will be showing to paying prospects.
 
 ---
 
@@ -84,7 +84,7 @@ Ten minutes, once.
 
 - [ ] `ssh root@<ip>` and confirm access.
 - [ ] `apt update && apt upgrade -y`
-- [ ] Create a **2 GB swapfile**. With 8 GB of RAM this is insurance rather than a requirement — but it costs 2 GB of an 80 GB disk and covers the deploy-swap window, so still do it:
+- [ ] Create a **2 GB swapfile** — real OOM insurance, not a formality. At 4 GB, two apps plus two Postgres services plus the extra container that exists briefly during every zero-downtime swap is a genuine squeeze:
       ```sh
       fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
       echo '/swapfile none swap sw 0 0' >> /etc/fstab   # survives reboot
@@ -407,11 +407,11 @@ Parallel track. Blocks **seed quality**, not infrastructure.
 
 | Item | Cost |
 |---|---|
-| Hetzner CX23 VPS, Helsinki (hosts **both** environments) | $4.49/mo |
+| Hetzner CX23 VPS, Helsinki (hosts **both** environments) | $6.49/mo |
 | Domain (already owned) | — |
 | TLS × 2 (Let's Encrypt) | free |
 | GitHub Actions (public repo) | free |
 | GHCR (public package) | free |
-| **Total** | **~$5/mo** |
+| **Total** | **~$6.50/mo** |
 
-Adding staging costs nothing but RAM, and the CX23's 8 GB absorbs it without moving up a tier. Prices drift; confirm current rates at signup.
+Adding staging costs nothing but RAM, which is exactly why section A sizes for 4 GB and section B insists on the swapfile. Prices drift; confirm current rates at signup.
