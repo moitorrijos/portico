@@ -28,7 +28,7 @@ push
 
 | Section | State |
 |---|---|
-| A–C · VPS, hardening, Dokku | ⬜ not started — being provisioned |
+| A–C · VPS, hardening, Dokku | ⬜ in progress — CX23 Helsinki chosen, being provisioned |
 | D · DNS (two records) | ⬜ not started |
 | E · Apps, Postgres, storage, config | ⬜ not started |
 | **F · GitHub repo, Actions, protection** | ✅ **done** except making the GHCR package public |
@@ -61,18 +61,20 @@ Because builds happen in GitHub Actions and the VPS only *pulls* finished images
 | Docker + Dokku overhead | ~300 MB |
 | **A second container, briefly, during every zero-downtime swap** | + one app's worth |
 
-That lands around **1.3 GB steady with ~250 MB of spike**. Dokku's stated floor is 1 GB plus swap, which is not enough here. **4 GB is the right call now that staging is in scope** — 2 GB would survive but leave no headroom.
+That lands around **1.3 GB steady with ~250 MB of spike**. Dokku's stated floor is 1 GB plus swap, which is not enough here. 4 GB would be adequate; the plan chosen below has 8 GB, so memory headroom is simply not a concern.
 
-- [ ] **Hetzner Cloud `CX22`** — 2 vCPU / 4 GB / 40 GB NVMe, roughly €4–5/mo, the best price-performance available. Image: **Ubuntu 24.04**.
-- [ ] ⚠️ **Check the plan is offered in a US location before committing.** Hetzner's US regions (Ashburn VA, Hillsboro OR) have historically carried only the **CPX** AMD line, with the **CX** line EU-only. If `CX22` isn't available in Ashburn, either:
-      - take **`CPX21`** (3 vCPU / 4 GB) in Ashburn — roughly double the price but still under €10/mo, **or**
-      - keep `CX22` in **Falkenstein/Nuremberg** and accept ~100 ms more latency for US viewers, which is genuinely fine for a demo, just not ideal.
+> **Decided: Hetzner Cloud `CX23`, Helsinki (`hel1`)** — 2 vCPU / 8 GB / 80 GB NVMe, **€4.49/mo**, Ubuntu 24.04.
 
-      Prefer the US option if the price delta doesn't bother you — the prospects clicking this link are mostly US-based.
-- [ ] Fallback if you'd rather buy time than save money: **DigitalOcean** 4 GB droplet (~$24/mo) has a **Dokku 1-Click image** that skips section C entirely.
-- [ ] Also fine: Vultr, Linode/Akamai. **Avoid Contabo** — heavily oversubscribed, and this is a server you'll be showing to paying prospects.
+- [ ] Create the server: plan **`CX23`**, location **Helsinki**, image **Ubuntu 24.04**.
+- [ ] ⚠️ **Keep to the `CX` line, not `CAX`.** `CX` is x86 (Intel/AMD shared vCPU), which is what the existing Dockerfile and Actions workflow already build for. The cheaper Arm64 **`CAX`** plans would require an arm64 image build and a matching Prisma query-engine target — real work, for no benefit here.
 - [ ] Add your SSH public key during creation. **Do not choose password auth.**
 - [ ] Note the IPv4 address; enable IPv6 if offered.
+
+**On the EU location.** Helsinki costs ~100–120 ms extra round-trip for US viewers. For mostly server-rendered pages that shows up as a slightly slower first paint and nothing else — there is no chatty client-side fetching in this app to multiply the penalty. The price and the 8 GB are worth more than the latency.
+
+If it ever does start to bother you, putting Cloudflare in front caches the static marketing pages at the edge, which is the surface a prospect judges first. Not needed to launch, and not worth doing pre-emptively.
+
+**Alternatives, for the record.** DigitalOcean's 4 GB droplet (~$24/mo) has a **Dokku 1-Click image** that skips section C entirely — five times the price to save one command. Vultr and Linode/Akamai are fine. **Avoid Contabo** — heavily oversubscribed, and this is a server you will be showing to paying prospects.
 
 ---
 
@@ -82,7 +84,7 @@ Ten minutes, once.
 
 - [ ] `ssh root@<ip>` and confirm access.
 - [ ] `apt update && apt upgrade -y`
-- [ ] Create a **2 GB swapfile** — cheap OOM insurance for the deploy-swap window, and it matters more with two apps sharing the box:
+- [ ] Create a **2 GB swapfile**. With 8 GB of RAM this is insurance rather than a requirement — but it costs 2 GB of an 80 GB disk and covers the deploy-swap window, so still do it:
       ```sh
       fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
       echo '/swapfile none swap sw 0 0' >> /etc/fstab   # survives reboot
@@ -405,11 +407,11 @@ Parallel track. Blocks **seed quality**, not infrastructure.
 
 | Item | Cost |
 |---|---|
-| Hetzner CX22 VPS (hosts **both** environments) | ~€4–5/mo |
+| Hetzner CX23 VPS, Helsinki (hosts **both** environments) | €4.49/mo |
 | Domain (already owned) | — |
 | TLS × 2 (Let's Encrypt) | free |
 | GitHub Actions (public repo) | free |
 | GHCR (public package) | free |
 | **Total** | **~€5/mo** |
 
-Adding staging costs nothing but RAM — which is why the sizing in section A moved to 4 GB. Prices drift; confirm current rates at signup.
+Adding staging costs nothing but RAM, and the CX23's 8 GB absorbs it without moving up a tier. Prices drift; confirm current rates at signup.
