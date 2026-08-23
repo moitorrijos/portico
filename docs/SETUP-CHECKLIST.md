@@ -63,7 +63,7 @@ Because builds happen in GitHub Actions and the VPS only *pulls* finished images
 
 That lands around **1.3 GB steady with ~250 MB of spike**. Dokku's stated floor is 1 GB plus swap, which is not enough here. 4 GB would be adequate; the plan chosen below has 8 GB, so memory headroom is simply not a concern.
 
-> **Decided: Hetzner Cloud `CX23`, Helsinki (`hel1`)** — 2 vCPU / 8 GB / 80 GB NVMe, **€4.49/mo**, Ubuntu 24.04.
+> **Decided: Hetzner Cloud `CX23`, Helsinki (`hel1`)** — 2 vCPU / 8 GB / 80 GB NVMe, **$4.49/mo**, Ubuntu 24.04.
 
 - [ ] Create the server: plan **`CX23`**, location **Helsinki**, image **Ubuntu 24.04**.
 - [ ] ⚠️ **Keep to the `CX` line, not `CAX`.** `CX` is x86 (Intel/AMD shared vCPU), which is what the existing Dockerfile and Actions workflow already build for. The cheaper Arm64 **`CAX`** plans would require an arm64 image build and a matching Prisma query-engine target — real work, for no benefit here.
@@ -74,7 +74,7 @@ That lands around **1.3 GB steady with ~250 MB of spike**. Dokku's stated floor 
 
 If it ever does start to bother you, putting Cloudflare in front caches the static marketing pages at the edge, which is the surface a prospect judges first. Not needed to launch, and not worth doing pre-emptively.
 
-**Alternatives, for the record.** DigitalOcean's 4 GB droplet (~$24/mo) has a **Dokku 1-Click image** that skips section C entirely — five times the price to save one command. Vultr and Linode/Akamai are fine. **Avoid Contabo** — heavily oversubscribed, and this is a server you will be showing to paying prospects.
+**Alternatives, for the record.** DigitalOcean's 4 GB droplet (~$24/mo) has a **Dokku 1-Click image** that skips section C entirely — more than five times the price, in the same currency, to save one command. Vultr and Linode/Akamai are fine. **Avoid Contabo** — heavily oversubscribed, and this is a server you will be showing to paying prospects.
 
 ---
 
@@ -407,11 +407,11 @@ Parallel track. Blocks **seed quality**, not infrastructure.
 
 | Item | Cost |
 |---|---|
-| Hetzner CX23 VPS, Helsinki (hosts **both** environments) | €4.49/mo |
+| Hetzner CX23 VPS, Helsinki (hosts **both** environments) | $4.49/mo |
 | Domain (already owned) | — |
 | TLS × 2 (Let's Encrypt) | free |
 | GitHub Actions (public repo) | free |
 | GHCR (public package) | free |
-| **Total** | **~€5/mo** |
+| **Total** | **~$5/mo** |
 
 Adding staging costs nothing but RAM, and the CX23's 8 GB absorbs it without moving up a tier. Prices drift; confirm current rates at signup.
