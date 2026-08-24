@@ -9,7 +9,7 @@ Commands verified against Dokku **v0.38.27** docs.
 | Branch | Dokku app | Domain | `APP_ENV` | Public? |
 |---|---|---|---|---|
 | `main` | `portico` | `portico.frontendjuan.com` | `production` | Yes — marketing is indexable |
-| `develop` | `portico-staging` | `staging-portico.frontendjuan.com` | `staging` | **No** — noindex everywhere, basic auth |
+| `develop` | `portico-staging` | `portico-staging.frontendjuan.com` | `staging` | **No** — noindex everywhere, basic auth |
 
 Both run on the **same VPS**, each with its own Postgres service and storage mount. Staging is never wired to production data.
 
@@ -28,9 +28,11 @@ push
 
 | Section | State |
 |---|---|
-| A–C · VPS, hardening, Dokku | ⬜ in progress — CX23 Helsinki chosen, being provisioned |
-| D · DNS (two records) | ⬜ not started |
-| E · Apps, Postgres, storage, config | ⬜ not started |
+| A · VPS provisioned | ✅ CX23 Helsinki, `95.216.145.241`, specs read off the box |
+| B · Hardening | ✅ except the **firewall**, still inactive |
+| C · Dokku install | ✅ v0.38.27 + Docker + nginx, via the official bootstrap |
+| D · DNS | ✅ both records live on `frontendjuan.com`, reaching nginx |
+| E · Apps, Postgres, storage, config | ⬜ next — bare `portico` app exists |
 | **F · GitHub repo, Actions, protection** | ✅ **done** except making the GHCR package public |
 | G · Deploy key and secrets | ⬜ not started — `DOKKU_HOST` and `DOKKU_SSH_PRIVATE_KEY` confirmed empty in CI |
 | H · First deploys and TLS | ⬜ blocked on A–E and G |
@@ -63,12 +65,22 @@ Because builds happen in GitHub Actions and the VPS only *pulls* finished images
 
 That lands around **1.3 GB steady with ~250 MB of spike**. Dokku's stated floor is 1 GB plus swap, which is not enough here. **4 GB is the right size** — comfortable for the steady state with room for the swap window, but not so lavish that the swapfile in section B stops mattering.
 
-> **Decided: Hetzner Cloud `CX23`, Helsinki (`hel1`)** — 2 vCPU, 4 GB RAM, **$6.49/mo**, Ubuntu 24.04.
+> **Provisioned: Hetzner Cloud `CX23`, Helsinki (`hel1`)** — **$6.49/mo**, `95.216.145.241`.
+>
+> Read off the box, not a screenshot:
+>
+> | | |
+> |---|---|
+> | Architecture | `x86_64` — no arm64 image or Prisma engine work needed |
+> | vCPU | 2 |
+> | RAM | 3.7 GiB usable (the 4 GB tier) |
+> | Disk | 38 GB, 35 GB free |
+> | OS | Ubuntu 24.04.4 LTS, kernel 6.8 |
 
-- [ ] Create the server: plan **`CX23`**, location **Helsinki**, image **Ubuntu 24.04**.
-- [ ] ⚠️ **Keep to the `CX` line, not `CAX`.** `CX` is x86 (Intel/AMD shared vCPU), which is what the existing Dockerfile and Actions workflow already build for. The cheaper Arm64 **`CAX`** plans would require an arm64 image build and a matching Prisma query-engine target — real work, for no benefit here.
-- [ ] Add your SSH public key during creation. **Do not choose password auth.**
-- [ ] Note the IPv4 address; enable IPv6 if offered.
+- [x] Create the server: plan **`CX23`**, location **Helsinki**, image **Ubuntu 24.04**.
+- [x] ⚠️ **Keep to the `CX` line, not `CAX`.** `CX` is x86 (Intel/AMD shared vCPU), which is what the existing Dockerfile and Actions workflow already build for. The cheaper Arm64 **`CAX`** plans would require an arm64 image build and a matching Prisma query-engine target — real work, for no benefit here.
+- [x] Add your SSH public key during creation. **Do not choose password auth.**
+- [x] Note the IPv4 address (`95.216.145.241`); enable IPv6 if offered.
 
 **On the EU location.** Helsinki costs ~100–120 ms extra round-trip for US viewers. For mostly server-rendered pages that shows up as a slightly slower first paint and nothing else — there is no chatty client-side fetching in this app to multiply the penalty. The price is worth more than the latency here.
 
@@ -78,66 +90,108 @@ If it ever does start to bother you, putting Cloudflare in front caches the stat
 
 ---
 
-## B. Harden the server
+## B. Harden the server ✅ except the firewall
 
-Ten minutes, once.
+Verified on the box, not assumed.
 
-- [ ] `ssh root@<ip>` and confirm access.
-- [ ] `apt update && apt upgrade -y`
-- [ ] Create a **2 GB swapfile** — real OOM insurance, not a formality. At 4 GB, two apps plus two Postgres services plus the extra container that exists briefly during every zero-downtime swap is a genuine squeeze:
+- [x] `ssh root@<ip>` and confirm access.
+- [x] `apt update && apt upgrade -y` — ⚠️ 3 packages upgradable again (`console-setup`, `console-setup-linux`, `keyboard-configuration`) and **a reboot is pending**. Neither is urgent.
+- [x] **2 GB swapfile**, created and verified:
       ```sh
       fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
-      echo '/swapfile none swap sw 0 0' >> /etc/fstab   # survives reboot
+      echo '/swapfile none swap sw 0 0' >> /etc/fstab
       ```
-- [ ] Firewall:
+      `chmod 600` before `mkswap` is not hygiene theatre — swap can hold anything that was in memory, including `SESSION_SECRET` and `DATABASE_URL`.
+
+      **Prove the fstab line works before trusting it**, since a bad entry only shows up at boot:
       ```sh
-      ufw allow 22 && ufw allow 80 && ufw allow 443 && ufw enable
+      swapoff /swapfile && swapon -a && swapon --show   # reappears = valid
       ```
+- [x] **`vm.swappiness` lowered to 10.** Ubuntu ships 60, which pages out eagerly. Here swap is OOM insurance for the deploy window, not routine paging — a dashboard that pages in mid-request feels broken:
+      ```sh
+      sysctl vm.swappiness=10 && echo 'vm.swappiness=10' > /etc/sysctl.d/99-swap.conf
+      ```
+- [ ] ⚠️ **Firewall — still inactive.** `ufw` is installed but off. Only `sshd` and nginx listen publicly, but **the box logged 18,612 failed SSH login attempts in 24 hours** — it is being actively brute-forced. They all fail (password auth is off), so this is not urgent, but it is not hypothetical either.
+      ```sh
+      ufw allow 22 && ufw allow 80 && ufw allow 443 && ufw --force enable
+      ```
+      **Allow 22 before enabling**, or you drop your own session. `--force` skips the prompt that otherwise hangs a non-interactive run.
+
       **Port 80 must stay open** — Let's Encrypt's HTTP-01 challenge needs it, not just 443.
-- [ ] Disable SSH password auth: set `PasswordAuthentication no` in `/etc/ssh/sshd_config`, then `systemctl restart ssh`.
-- [ ] Recommended: `apt install unattended-upgrades -y` for automatic security patches.
-- [ ] Set a recognisable hostname so `dokku` output isn't confusing six months from now.
+
+      > ⚠️ **Docker bypasses ufw.** Docker writes its own iptables rules, so a published container port stays reachable even when `ufw status` says otherwise. It mostly does not bite here — Dokku serves through nginx on 80/443 and keeps Postgres on an internal network — but check with `ss -tlnp`, not `ufw status`.
+- [x] **SSH password auth already disabled** — Hetzner's image ships key-only. Verified the *effective* config, not the file:
+      ```
+      passwordauthentication no      permitrootlogin without-password
+      pubkeyauthentication yes       permitemptypasswords no
+      ```
+      Read it with `sshd -T | grep -i passwordauth`; a later `Include` can override what `sshd_config` appears to say.
+- [x] **`unattended-upgrades` installed *and* enabled** — not the same thing. Service enabled and active, `/etc/apt/apt.conf.d/20auto-upgrades` has both periodic keys at `1`, and it last ran today.
+- [x] **Hostname set to `dokku-hel1`** (was `ubuntu-personal-2026`), and it survived a reboot along with the swapfile.
+      ```sh
+      hostnamectl set-hostname dokku-hel1
+      ```
+      Two cloud-init traps on Hetzner, both hit here:
+
+      - `preserve_hostname` was `false`, so cloud-init would have reapplied the console name at next boot and silently undone this. Set it to `true` in `/etc/cloud/cloud.cfg`.
+      - `manage_etc_hosts` is `true`, so `/etc/hosts` is regenerated from a template. It now maps `dokku-hel1` at **`127.0.1.1`** — the Debian convention for the machine's own name, not `127.0.0.1`. Get it wrong and `sudo` hangs for seconds on every call.
+
+      Named for the host, not the app: this is a general Dokku box that may hold more than Pórtico, and a machine named after one of three apps is worse than no name.
+
+      > Not to be confused with `dokku domains:set` in section E. The hostname is the machine's name and invisible to visitors; the domain is what nginx serves.
 
 ---
 
-## C. Install Dokku
+## C. Install Dokku ✅ done
 
-- [ ] Confirm the current tag at <https://dokku.com/docs/getting-started/installation/> — it moves, so don't paste a stale version.
-- [ ] Install:
+- [x] Dokku **v0.38.27**, Docker **29.7.2**, nginx **1.24.0** — installed and active.
       ```sh
       wget -NP . https://dokku.com/install/v0.38.27/bootstrap.sh
       sudo DOKKU_TAG=v0.38.27 bash bootstrap.sh
       ```
-- [ ] Add your **personal** SSH key so you can run `dokku` remotely:
+- [x] **Use the official bootstrap, never a source build.** This box was first set up from source, which skipped the Debian package's `postinst` and produced two failures that only surfaced later:
+
+      - **nginx was never installed** — the deb pulls it in as a dependency. Dokku sat there with `computed proxy type: nginx` and no nginx binary, so a deploy would have built the image fine and then served nothing.
+      - **The sudoers files were missing**, so the `dokku` user could not reload nginx: `dokku nginx:validate-config` failed with `sudo: a password is required`.
+
+      Re-running the official bootstrap over the top fixed both, kept the version identical, and preserved the existing app. Verified after: `nginx:validate-config`, `nginx:reload` and `domains:set-global` all exit `0`.
+
+      > The sudoers files are **per-plugin** — `dokku-nginx`, `dokku-storage`, `dokku-docker-container-healthchecker`. Looking for a single `/etc/sudoers.d/dokku` and concluding they are absent is an easy false alarm; I made exactly that mistake.
+- [x] Personal SSH key added: `cat ~/.ssh/id_ed25519.pub | dokku ssh-keys:add admin`
+- [x] **Global domain set**, so apps get sensible vhosts by default:
       ```sh
-      cat ~/.ssh/id_ed25519.pub | dokku ssh-keys:add admin
+      dokku domains:set-global frontendjuan.com
       ```
-- [ ] Verify: `dokku version` and `dokku apps:list` (empty is correct).
-- [ ] Install the plugins:
+      It defaulted to the machine hostname (`dokku-hel1`), which resolves nowhere. With this set, `apps:create portico` lands on `portico.frontendjuan.com` and `portico-staging` on `portico-staging.frontendjuan.com` — the naming actually in use, which makes section E's explicit `domains:set` calls belt-and-braces rather than load-bearing.
+- [x] Catch-all vhost at `/etc/nginx/conf.d/00-default-vhost.conf`; nginx's conflicting `sites-enabled/default` removed.
+
+      It answers unknown Host headers with `444` (close, no response). **An unmatched hostname returning nothing is correct**, not a fault — before this, nginx's "Welcome to nginx" page answered on every hostname pointed at the box. A deployed app with no vhost yet also falls through to this, so `HTTP 000` before the first deploy is expected.
+- [ ] Remaining plugins, installed in section E:
       ```sh
       sudo dokku plugin:install https://github.com/dokku/dokku-postgres.git postgres
       sudo dokku plugin:install https://github.com/dokku/dokku-letsencrypt.git
-      # locks staging behind HTTP basic auth (section L):
-      sudo dokku plugin:install https://github.com/dokku/dokku-http-auth.git
-      # only needed if the GHCR package stays private:
-      sudo dokku plugin:install https://github.com/dokku/dokku-registry.git
       ```
+      `dokku-http-auth` is **already installed** (needed for section L).
 
 ---
 
-## D. DNS
+## D. DNS ✅ done
 
-**Two records**, both pointing at the same VPS.
+Both records live on **`frontendjuan.com`**, matching §1 of the spec — the piece sits alongside `urbana.frontendjuan.com` as one body of work.
 
-- [ ] A record: `portico` → VPS IPv4
-- [ ] A record: `staging-portico` → VPS IPv4
-- [ ] Add matching `AAAA` records if you enabled IPv6.
-- [ ] Set TTL low (300 s) for the first day, in case you need to move it.
-- [ ] Verify **both** resolve before attempting TLS:
+- [x] A record: `portico` → `95.216.145.241`
+- [x] A record: `portico-staging` → `95.216.145.241`
+- [x] Verified resolving *and* reaching nginx on the box:
       ```sh
-      dig +short portico.frontendjuan.com
-      dig +short staging-portico.frontendjuan.com
+      dig +short portico.frontendjuan.com          # -> 95.216.145.241
+      dig +short portico-staging.frontendjuan.com  # -> 95.216.145.241
       ```
+- [x] **Proxy status `DNS only`** (grey cloud) in Cloudflare. Keep it — proxying breaks Let's Encrypt's HTTP-01 challenge in section H.
+- [ ] Optional: `AAAA` records if you enable IPv6.
+
+> **A dead domain is usually not DNS.** When these first looked unreachable, the records were already correct and propagated — nothing was listening on port 80. Check the raw IP with `curl -sI http://<ip>/` before suspecting DNS; if the IP does not answer either, the problem is on the box.
+>
+> Earlier records on `juanmtorrijos.com` are now spare and can be deleted.
 
 ---
 
@@ -149,9 +203,9 @@ Run the whole section **twice** — once per environment. The two apps are ident
 |---|---|---|
 | App | `portico` | `portico-staging` |
 | Postgres service | `portico-db` | `portico-staging-db` |
-| Domain | `portico.frontendjuan.com` | `staging-portico.frontendjuan.com` |
+| Domain | `portico.frontendjuan.com` | `portico-staging.frontendjuan.com` |
 | `APP_ENV` | `production` | `staging` |
-| `APP_URL` | `https://portico.frontendjuan.com` | `https://staging-portico.frontendjuan.com` |
+| `APP_URL` | `https://portico.frontendjuan.com` | `https://portico-staging.frontendjuan.com` |
 
 ### Production
 
@@ -189,12 +243,12 @@ Run the whole section **twice** — once per environment. The two apps are ident
       dokku storage:ensure-directory portico-staging
       dokku storage:mount portico-staging /var/lib/dokku/data/storage/portico-staging:/storage
 
-      dokku domains:set portico-staging staging-portico.frontendjuan.com
+      dokku domains:set portico-staging portico-staging.frontendjuan.com
       dokku ports:set portico-staging http:80:3000
 
       dokku config:set portico-staging \
         APP_ENV=staging \
-        APP_URL='https://staging-portico.frontendjuan.com' \
+        APP_URL='https://portico-staging.frontendjuan.com' \
         SESSION_SECRET="$(openssl rand -base64 32)" \
         DEMO_MODE=true \
         NODE_ENV=production
@@ -293,9 +347,9 @@ Do **staging first.** That's the entire point of having it — find the broken S
       ```
 - [ ] Confirm staging is **not** indexable:
       ```sh
-      curl -sI https://staging-portico.frontendjuan.com/ | grep -i x-robots-tag
+      curl -sI https://portico-staging.frontendjuan.com/ | grep -i x-robots-tag
       #   expect: noindex, nofollow, noarchive, nosnippet, noimageindex
-      curl -s  https://staging-portico.frontendjuan.com/robots.txt
+      curl -s  https://portico-staging.frontendjuan.com/robots.txt
       #   expect: Disallow: /   (for * and for the named AI crawlers)
       ```
       The workflow asserts both automatically and fails the job if either is missing — but check by hand once, so you've seen it with your own eyes.
@@ -354,9 +408,9 @@ Do **staging first.** That's the entire point of having it — find the broken S
       ```
 - [ ] Verify it bites:
       ```sh
-      curl -so /dev/null -w '%{http_code}\n' https://staging-portico.frontendjuan.com/   # expect 401
+      curl -so /dev/null -w '%{http_code}\n' https://portico-staging.frontendjuan.com/   # expect 401
       curl -so /dev/null -w '%{http_code}\n' -u user:pass \
-           https://staging-portico.frontendjuan.com/                                     # expect 200
+           https://portico-staging.frontendjuan.com/                                     # expect 200
       ```
 - [ ] Add the credentials as the `STAGING_BASIC_AUTH` secret (`user:password`) so the workflow's post-deploy checks can read past the 401.
 - [ ] Note: **Dokku's own healthchecks bypass nginx**, hitting the container directly — so basic auth does not break zero-downtime deploys. Only external checks need credentials.

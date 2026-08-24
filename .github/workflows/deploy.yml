@@ -81,7 +81,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: staging
-      url: https://staging-portico.frontendjuan.com
+      url: https://portico-staging.frontendjuan.com
     steps:
       - name: Deploy
         env:
@@ -107,7 +107,7 @@ jobs:
           STAGING_BASIC_AUTH: ${{ secrets.STAGING_BASIC_AUTH }}
         run: |
           set -euo pipefail
-          URL=https://staging-portico.frontendjuan.com
+          URL=https://portico-staging.frontendjuan.com
 
           # A wrapper rather than an array: empty-array expansion under `set -u`
           # errors on bash < 4.4, and this stays correct on any version.

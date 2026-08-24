@@ -26,7 +26,7 @@ Flow: branch off `develop` → PR into `develop` → soak on staging → PR `dev
 
 | Branch | Deploys to | Domain |
 |---|---|---|
-| `develop` | `portico-staging` | `staging-portico.frontendjuan.com` |
+| `develop` | `portico-staging` | `portico-staging.frontendjuan.com` |
 | `main` | `portico` | `portico.frontendjuan.com` |
 
 History is squash-only; merged branches auto-delete.

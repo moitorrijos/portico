@@ -9,7 +9,7 @@ One-time infrastructure setup lives in **[SETUP-CHECKLIST.md](./SETUP-CHECKLIST.
 | Branch | Dokku app | Domain | `APP_ENV` | Indexable |
 |---|---|---|---|---|
 | `main` | `portico` | `portico.frontendjuan.com` | `production` | Marketing yes; `/app` + `/portal` no |
-| `develop` | `portico-staging` | `staging-portico.frontendjuan.com` | `staging` | **Nothing.** Search and AI crawlers blocked |
+| `develop` | `portico-staging` | `portico-staging.frontendjuan.com` | `staging` | **Nothing.** Search and AI crawlers blocked |
 | PRs | — | — | — | Builds only, never deploys |
 
 Both apps run on the same VPS with **separate Postgres services** and separate storage mounts. Staging is never wired to production data.
