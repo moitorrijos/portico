@@ -96,7 +96,29 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           # Pin the host key rather than disabling verification.
           ssh-keyscan -H "$DOKKU_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          ssh "dokku@$DOKKU_HOST" git:from-image "$DOKKU_APP" "$IMAGE"
+          # `git:from-image` is NOT idempotent: re-deploying an image the app is
+          # already on exits 1 with "No changes detected, skipping git commit".
+          # That matters, because the first deploy of any new app fails its
+          # post-deploy TLS check and has to be re-run -- and a re-run must not
+          # be blocked by the deploy step refusing to repeat itself. Dokku's own
+          # message names the remedy, so follow it rather than treating a
+          # no-op as a failure.
+          set +e
+          OUT=$(ssh "dokku@$DOKKU_HOST" git:from-image "$DOKKU_APP" "$IMAGE" 2>&1)
+          CODE=$?
+          set -e
+          echo "$OUT"
+          if [ "$CODE" -ne 0 ]; then
+            case "$OUT" in
+              *"No changes detected"*)
+                echo "App is already on this image; rebuilding instead."
+                ssh "dokku@$DOKKU_HOST" ps:rebuild "$DOKKU_APP"
+                ;;
+              *)
+                exit "$CODE"
+                ;;
+            esac
+          fi
 
       - name: Verify staging is not indexable
         env:
@@ -178,7 +200,29 @@ jobs:
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H "$DOKKU_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          ssh "dokku@$DOKKU_HOST" git:from-image "$DOKKU_APP" "$IMAGE"
+          # `git:from-image` is NOT idempotent: re-deploying an image the app is
+          # already on exits 1 with "No changes detected, skipping git commit".
+          # That matters, because the first deploy of any new app fails its
+          # post-deploy TLS check and has to be re-run -- and a re-run must not
+          # be blocked by the deploy step refusing to repeat itself. Dokku's own
+          # message names the remedy, so follow it rather than treating a
+          # no-op as a failure.
+          set +e
+          OUT=$(ssh "dokku@$DOKKU_HOST" git:from-image "$DOKKU_APP" "$IMAGE" 2>&1)
+          CODE=$?
+          set -e
+          echo "$OUT"
+          if [ "$CODE" -ne 0 ]; then
+            case "$OUT" in
+              *"No changes detected"*)
+                echo "App is already on this image; rebuilding instead."
+                ssh "dokku@$DOKKU_HOST" ps:rebuild "$DOKKU_APP"
+                ;;
+              *)
+                exit "$CODE"
+                ;;
+            esac
+          fi
 
       - name: Verify production indexability is correct
         env:
