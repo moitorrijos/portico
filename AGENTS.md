@@ -29,7 +29,13 @@ Flow: branch off `develop` → PR into `develop` → soak on staging → PR `dev
 | `develop` | `portico-staging` | `portico-staging.frontendjuan.com` |
 | `main` | `portico` | `portico.frontendjuan.com` |
 
-History is squash-only; merged branches auto-delete.
+Merged branches auto-delete. **Feature PRs squash; release PRs merge.**
+
+`develop` → `main` is the one exception to squash-only, and it is deliberate.
+Squashing a release would collapse every commit into one new SHA on `main`,
+permanently diverging it from `develop` — so the next release PR replays the
+same history and conflicts. A merge commit keeps `main` a true superset, which
+makes every subsequent release a clean fast-forward.
 
 ## Commit messages
 
@@ -69,7 +75,9 @@ See `docs/DEPLOY.md` for the full local verification recipe, and `docs/SETUP-CHE
 ## Things that are load-bearing
 
 - **`app/robots.ts` must keep `export const dynamic = "force-dynamic"`.** Without it the route is prerendered and the build-time `APP_ENV` gets baked in, which would ship a `Disallow: /` robots.txt to production.
-- **`APP_ENV` fails closed.** Anything not exactly `production` is treated as staging and served `noindex`. A typo hides staging rather than exposing it, but a missing `APP_ENV=production` silently deindexes the real site.
+- **Indexability has two gates, and `lib/indexing.ts` owns both.** `APP_ENV=production` *and* `ALLOW_INDEXING=true`. Anything else — staging, a typo, an unset variable — is served `noindex` everywhere. A typo hides a site that should be visible, which is recoverable; the other direction publishes one that should not be, which is not.
+- **Never read `APP_ENV` for indexing decisions directly.** `proxy.ts` and `app/robots.ts` are two expressions of one policy, and when they disagree nothing fails — the header says one thing and `robots.txt` says another, silently. Both call `isPubliclyIndexable()` so drift is impossible rather than unlikely.
+- **`ALLOW_INDEXING` is unset on production on purpose.** The live domain currently serves a placeholder; a placeholder indexed under the real domain is worse than no listing. Set it when the Phase 4 marketing site ships — `dokku config:set portico ALLOW_INDEXING=true` — and the deploy workflow, which reads that same variable off the app, will flip its assertion with it.
 - **Robots headers live in `proxy.ts`, not `next.config.ts` `headers()`.** The latter is compiled into the routes manifest and cannot branch on a runtime env var.
 - **Never bake an environment into the image via `NEXT_PUBLIC_*`.** Those are inlined at build time and CI does not know a commit's destination. Use server-side `APP_URL`.
 - **`proxy.ts` is not an authorization boundary.** Optimistic cookie checks only; real authorization lives in the data access layer and inside each server action.

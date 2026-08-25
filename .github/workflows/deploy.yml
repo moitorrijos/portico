@@ -181,6 +181,8 @@ jobs:
           ssh "dokku@$DOKKU_HOST" git:from-image "$DOKKU_APP" "$IMAGE"
 
       - name: Verify production indexability is correct
+        env:
+          DOKKU_HOST: ${{ secrets.DOKKU_HOST }}
         run: |
           set -euo pipefail
           URL=https://portico.frontendjuan.com
@@ -203,17 +205,39 @@ jobs:
             exit 1
           fi
 
-          # Marketing must be indexable -- a stray noindex here would quietly
-          # deindex the site, which is the failure nobody notices for weeks.
-          echo "--- / (expect NO noindex) ---"
+          # What SHOULD / look like? Ask the app, not a flag duplicated in CI.
+          # ALLOW_INDEXING on the Dokku app is the single source of truth that
+          # lib/indexing.ts reads at runtime; reading the same variable here
+          # means this assertion can never drift out of step with the app's
+          # actual behaviour. Anything other than exactly "true" -- including
+          # unset -- means we expect the site to be hidden.
+          ALLOW=$(ssh "dokku@$DOKKU_HOST" config:get portico ALLOW_INDEXING 2>/dev/null || true)
+          echo "ALLOW_INDEXING on portico: '${ALLOW:-<unset>}'"
+
+          echo "--- / ---"
           ROOT=$(curl -sSI "$URL/" | tr -d '\r' | grep -i '^x-robots-tag:' || true)
-          echo "${ROOT:-<none, correct>}"
-          case "$ROOT" in
-            *noindex*) echo "FAIL: production marketing page is noindex." \
-                            "APP_ENV is probably not set to 'production'." >&2
-                       exit 1 ;;
-            *) echo "OK: / carries no noindex" ;;
-          esac
+          echo "${ROOT:-<none>}"
+
+          if [ "$ALLOW" = "true" ]; then
+            # Launched. A stray noindex here would quietly deindex the site,
+            # which is the failure nobody notices for weeks.
+            case "$ROOT" in
+              *noindex*) echo "FAIL: production marketing page is noindex, but" \
+                              "ALLOW_INDEXING=true says it should be public." \
+                              "Check APP_ENV on the portico app." >&2
+                         exit 1 ;;
+              *) echo "OK: / is indexable, as intended" ;;
+            esac
+          else
+            # Pre-launch. The placeholder must stay out of search results, and
+            # this asserts it rather than trusting that it happened.
+            case "$ROOT" in
+              *noindex*) echo "OK: / is held back from indexing (ALLOW_INDEXING is not 'true')" ;;
+              *) echo "FAIL: / is indexable, but ALLOW_INDEXING is not 'true'." \
+                      "The placeholder is being exposed to search engines." >&2
+                 exit 1 ;;
+            esac
+          fi
 
           # The authenticated trees must NOT be indexable.
           echo "--- /app (expect noindex) ---"
