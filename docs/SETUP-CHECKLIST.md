@@ -29,7 +29,7 @@ push
 | Section | State |
 |---|---|
 | A · VPS provisioned | ✅ CX23 Helsinki, `95.216.145.241`, specs read off the box |
-| B · Hardening | ✅ except the **firewall**, still inactive |
+| B · Hardening | ✅ done — firewall active as of 2026-08-25 |
 | C · Dokku install | ✅ v0.38.27 + Docker + nginx, via the official bootstrap |
 | D · DNS | ✅ both records live on `frontendjuan.com`, reaching nginx |
 | E · Apps, Postgres, storage, config | ✅ done — both apps, both databases linked, storage mounted, config set |
@@ -90,7 +90,7 @@ If it ever does start to bother you, putting Cloudflare in front caches the stat
 
 ---
 
-## B. Harden the server ✅ except the firewall
+## B. Harden the server ✅ done
 
 Verified on the box, not assumed.
 
@@ -111,15 +111,33 @@ Verified on the box, not assumed.
       ```sh
       sysctl vm.swappiness=10 && echo 'vm.swappiness=10' > /etc/sysctl.d/99-swap.conf
       ```
-- [ ] ⚠️ **Firewall — still inactive.** `ufw` is installed but off. Only `sshd` and nginx listen publicly, but **the box logged 18,612 failed SSH login attempts in 24 hours** — it is being actively brute-forced. They all fail (password auth is off), so this is not urgent, but it is not hypothetical either.
+- [x] **Firewall active.** The box had logged **18,612 failed SSH login attempts in 24 hours** — actively brute-forced. They all failed (password auth is off), but that is a reason to close the door, not to leave it open.
       ```sh
-      ufw allow 22 && ufw allow 80 && ufw allow 443 && ufw --force enable
+      ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw --force enable
       ```
-      **Allow 22 before enabling**, or you drop your own session. `--force` skips the prompt that otherwise hangs a non-interactive run.
+      **Stage the rules first and confirm 22 is among them**, or you drop your own session. `ufw show added` lists staged rules while still inactive — check that before enabling, not after. `--force` skips the prompt that otherwise hangs a non-interactive run.
 
       **Port 80 must stay open** — Let's Encrypt's HTTP-01 challenge needs it, not just 443.
 
-      > ⚠️ **Docker bypasses ufw.** Docker writes its own iptables rules, so a published container port stays reachable even when `ufw status` says otherwise. It mostly does not bite here — Dokku serves through nginx on 80/443 and keeps Postgres on an internal network — but check with `ss -tlnp`, not `ufw status`.
+      `IPV6=yes` is already set in `/etc/default/ufw`, and the box has a public IPv6 (`2a01:4f9:c015:5c43::1`), so each rule was applied to both families. A v4-only firewall on a v6-reachable box is a firewall with a hole in it.
+
+      **Arm a failsafe before enabling.** A wrong rule locks you out of a machine whose only other door is the provider's web console:
+      ```sh
+      systemd-run --on-active=300 --unit=ufw-failsafe /usr/sbin/ufw --force disable
+      # ...enable, then verify from a NEW connection...
+      systemctl stop ufw-failsafe.timer          # cancel once access is confirmed
+      ```
+      Verified afterwards with a **fresh** SSH connection, not the one already open — an established session survives on `ESTABLISHED,RELATED` and proves nothing about whether new ones can get in. Both sites still served; `ufw` is `enabled` so it survives reboot.
+
+- [x] ⚠️ **Docker bypasses ufw — demonstrated, not theorised.** With the firewall **active** and only 22/80/443 allowed, a container's published port still answered from the public internet:
+      ```sh
+      curl -o /dev/null -w '%{http_code}\n' http://95.216.145.241:32774/   # 200
+      ```
+      Docker writes its own `nat`/`FORWARD` rules, which are traversed before ufw's `INPUT` chain, so `ufw status` tells you nothing about published container ports. **Audit with `ss -tlnp`, never `ufw status`.**
+
+      What that exposes here: Dokku publishes each app's `EXPOSE`d port to a random high port on `0.0.0.0`, so `http://<ip>:32774/` reaches **staging directly, bypassing nginx and therefore bypassing the basic auth in section L**. Postgres is *not* affected — both services report `Exposed ports: -` and listen only on the internal bridge network.
+
+      The published ports buy nothing: nginx proxies to the container's bridge IP (`upstream { server 172.17.0.4:3000; }`), never to the host port. See section B's follow-up item below.
 - [x] **SSH password auth already disabled** — Hetzner's image ships key-only. Verified the *effective* config, not the file:
       ```
       passwordauthentication no      permitrootlogin without-password
