@@ -9,7 +9,7 @@ One-time infrastructure setup lives in **[SETUP-CHECKLIST.md](./SETUP-CHECKLIST.
 | Branch | Dokku app | Domain | `APP_ENV` | Indexable |
 |---|---|---|---|---|
 | `main` | `portico` | `portico.frontendjuan.com` | `production` | Marketing yes; `/app` + `/portal` no |
-| `develop` | `portico-staging` | `staging-portico.frontendjuan.com` | `staging` | **Nothing.** Search and AI crawlers blocked |
+| `develop` | `portico-staging` | `portico-staging.frontendjuan.com` | `staging` | **Nothing.** Search and AI crawlers blocked |
 | PRs | — | — | — | Builds only, never deploys |
 
 Both apps run on the same VPS with **separate Postgres services** and separate storage mounts. Staging is never wired to production data.
@@ -203,6 +203,6 @@ ssh dokku@HOST git:from-image portico ghcr.io/<owner>/portico:<sha-currently-on-
 
 **Logs:** `dokku logs portico -t` · `dokku logs portico-staging -t`
 
-**Disk:** `docker system prune -af` monthly. Two apps plus two Postgres services fill a 40 GB volume with old layers noticeably faster than one.
+**Disk:** `docker system prune -af` monthly. Two apps plus two Postgres services accumulate old image layers noticeably faster than one.
 
 **No database backups.** The data is seeded and truncated nightly by design — backing it up would be theatre. Deliberate, not an oversight.
