@@ -32,7 +32,7 @@ push
 | B · Hardening | ✅ except the **firewall**, still inactive |
 | C · Dokku install | ✅ v0.38.27 + Docker + nginx, via the official bootstrap |
 | D · DNS | ✅ both records live on `frontendjuan.com`, reaching nginx |
-| E · Apps, Postgres, storage, config | 🟡 in progress — `portico` app and `portico-db` exist; staging and all config outstanding |
+| E · Apps, Postgres, storage, config | ✅ done — both apps, both databases linked, storage mounted, config set |
 | **F · GitHub repo, Actions, protection** | ✅ **done** except making the GHCR package public |
 | G · Deploy key and secrets | ⬜ not started — `DOKKU_HOST` and `DOKKU_SSH_PRIVATE_KEY` confirmed empty in CI |
 | H · First deploys and TLS | ⬜ blocked on A–E and G |
@@ -217,7 +217,7 @@ Both records live on **`frontendjuan.com`**, matching §1 of the spec — the pi
 
 ---
 
-## E. Create the apps and their services
+## E. Create the apps and their services ✅ done
 
 Run the whole section **twice** — once per environment. The two apps are identical except for the values in this table:
 
@@ -231,7 +231,7 @@ Run the whole section **twice** — once per environment. The two apps are ident
 
 ### Production
 
-- [ ] ```sh
+- [x] ```sh
       dokku apps:create portico
 
       # The link step is what injects DATABASE_URL -- don't skip it.
@@ -256,7 +256,7 @@ Run the whole section **twice** — once per environment. The two apps are ident
 
 ### Staging
 
-- [ ] ```sh
+- [x] ```sh
       dokku apps:create portico-staging
 
       dokku postgres:create portico-staging-db
@@ -285,6 +285,51 @@ Run the whole section **twice** — once per environment. The two apps are ident
 > Give each app its **own** `SESSION_SECRET`. Sharing one would make staging cookies valid in production.
 >
 > Note `APP_URL`, not `NEXT_PUBLIC_APP_URL`. `NEXT_PUBLIC_*` is inlined at build time and CI doesn't know which environment a commit is bound for, so a public-prefixed URL would bake the wrong host into one of the two.
+
+### Verified after the run
+
+Read back off the box, both apps identical apart from the environment values:
+
+| | `portico` | `portico-staging` |
+|---|---|---|
+| `APP_ENV` | `production` | `staging` |
+| `DATABASE_URL` | injected by `postgres:link` | injected by `postgres:link` |
+| Postgres `Links:` | `portico` | `portico-staging` |
+| Postgres `Status:` | `running` | `running` |
+| Domain vhost | `portico.frontendjuan.com` | `portico-staging.frontendjuan.com` |
+| `Ports map:` | `http:80:3000` | `http:80:3000` |
+| Deploy mount | `/var/lib/dokku/data/storage/portico:/storage` | `/var/lib/dokku/data/storage/portico-staging:/storage` |
+| `SESSION_SECRET` | 44 chars, `sha256:63c65e9afb8b` | 44 chars, `sha256:19169b37956a` |
+
+Distinct fingerprints, which is the point — a shared secret would make staging cookies valid in production. Fingerprints rather than values so this file never carries the secrets.
+
+Memory with both databases up: **636 MiB used, 3.1 GiB available, swap at 1 MiB.** Room for both app containers plus a swap-window spike, which is what section A sized for.
+
+- [x] ⚠️ **`ports:set` had to be explicit — the detected default is wrong.** Before it was set, both apps reported `Ports map detected: http:80:5000`. 5000 is the herokuish default; the Next.js standalone server listens on **3000**. Dokku only *detects* that value, it does not commit it, so `Ports map:` was empty and the first deploy would have proxied to a dead port.
+
+- [x] ⚠️ **`storage:ensure-directory` chowns to the wrong uid for a Dockerfile app.** It set `32767:32767` (the herokuish "nobody" uid), but our Dockerfile ends on `USER nextjs` = **uid 1001**, so every upload write into `/storage` would have failed with `EACCES` — and only in Phase 5, when the first maintenance photo is uploaded.
+
+      ```sh
+      chown 1001:1001 /var/lib/dokku/data/storage/portico
+      chown 1001:1001 /var/lib/dokku/data/storage/portico-staging
+      ```
+
+      Proven rather than assumed, by writing as that uid through the same mount:
+      ```sh
+      docker run --rm -u 1001:1001 \
+        -v /var/lib/dokku/data/storage/portico:/storage \
+        busybox sh -c 'touch /storage/.probe && echo WRITE_OK && rm /storage/.probe'
+      ```
+
+      **If the Dockerfile's uid ever changes, this chown has to change with it.** The mount will keep working and only writes will fail.
+
+- [x] ⚠️ **`config:set` echoes the values it sets, secrets included.** Both `SESSION_SECRET`s were printed to the terminal in full. Harmless here — nothing was deployed and no session had ever been signed — but they were rotated immediately, with output suppressed:
+      ```sh
+      dokku config:set --no-restart portico SESSION_SECRET="$(openssl rand -base64 32)" >/dev/null 2>&1
+      ```
+      Confirm without revealing anything: `dokku config:get <app> SESSION_SECRET | sha256sum`.
+
+      Use `--no-restart` for pre-deploy config. Without it Dokku attempts a restart per call, which is noise on an app that has no image yet.
 
 - [ ] **TLS is deferred to section H** for both apps. Let's Encrypt needs a *running container* to answer the HTTP-01 challenge, so it cannot be enabled before the first deploy. Everything else in E must be done before H.
 
