@@ -120,6 +120,10 @@ docker rm -f portico-stg portico-prod
 
 **`images: { unoptimized: true }`.** Runtime image optimization is the wrong trade on a 4 GB box with 2 *shared* vCPUs: resizing is CPU-bound and competes with both app containers, and sharp on glibc needs `MALLOC_ARENA_MAX` tuning to avoid runaway memory (flagged in Next's own self-hosting docs). `scripts/prep-images.ts` pre-generates AVIF/WebP variants at known dimensions instead, which meets the Lighthouse ≥95 budget without the runtime cost.
 
+**`app.json` is copied into the image, deliberately.** Dokku reads it from `WORKDIR/app.json` *inside the image* — not from the repo, which with `git:from-image` never reaches the server. Nothing imports it, so standalone tracing leaves it out, and a missing `app.json` fails **silently**: Dokku logs one grey `No healthchecks found in app.json for web process type` and carries on with generic port checks. Today that only downgrades the healthcheck. From Phase 1 it means `scripts.dokku.predeploy` never runs, so migrations never apply and the app boots against an unmigrated database — and the `cron` block for the nightly reset disappears the same way.
+
+**The deploy step tolerates a repeat.** `git:from-image` exits 1 with `No changes detected` when the app already points at that image, so re-running a workflow would otherwise be impossible. The step falls back to `ps:rebuild`. This is not hypothetical: the first deploy of any new app fails its post-deploy check, because TLS cannot be enabled until a container is running to answer the HTTP-01 challenge.
+
 **Healthcheck at `/api/health`, `dynamic = "force-dynamic"`.** If it were statically prerendered the check would pass against a stale build rather than a live server.
 
 **In-memory rate limiting.** Single instance per app, so a sliding window keyed on `x-forwarded-for` is genuinely correct — no Redis, none of the serverless multi-instance caveats.

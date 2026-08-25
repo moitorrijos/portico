@@ -53,6 +53,21 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
+# Dokku reads app.json OUT OF THE IMAGE, at WORKDIR/app.json -- it is not read
+# from the repo, because with `git:from-image` the repo is never on the server.
+# Standalone output tracing does not include it (nothing imports it), so
+# without this line the file simply is not there and Dokku silently proceeds
+# without it. The deploy log admits this in one grey line:
+#
+#   No healthchecks found in app.json for web process type
+#
+# Today that only downgrades the /api/health startup check to a generic port
+# check. In Phase 1 it is much worse: `scripts.dokku.predeploy` is where
+# `prisma migrate deploy` runs, so a missing app.json means migrations never
+# run in production and the app starts against an unmigrated database. The
+# `cron` block for the nightly reset would go missing the same way.
+COPY --from=builder /app/app.json ./app.json
+
 # PHASE 1 -- standalone output tracing does NOT include prisma/schema.prisma or
 # the Prisma CLI, so `prisma migrate deploy` in app.json's predeploy hook will
 # fail without these three lines. This is the single easiest thing to get wrong:
