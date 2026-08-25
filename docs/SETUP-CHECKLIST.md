@@ -137,7 +137,31 @@ Verified on the box, not assumed.
 
       What that exposes here: Dokku publishes each app's `EXPOSE`d port to a random high port on `0.0.0.0`, so `http://<ip>:32774/` reaches **staging directly, bypassing nginx and therefore bypassing the basic auth in section L**. Postgres is *not* affected — both services report `Exposed ports: -` and listen only on the internal bridge network.
 
-      The published ports buy nothing: nginx proxies to the container's bridge IP (`upstream { server 172.17.0.4:3000; }`), never to the host port. See section B's follow-up item below.
+      The published ports buy nothing: nginx proxies to the container's bridge IP (`upstream { server 172.17.0.4:3000; }`), never to the host port.
+
+- [x] **Closed via `DOCKER-USER`, after the obvious fix turned out not to work.**
+
+      **What failed:** `{"ip": "127.0.0.1"}` in `/etc/docker/daemon.json`, the documented way to change the default bind address for published ports. `dockerd --help` still lists `--ip` as *"Host IP for port publishing"*, the daemon started cleanly with the key (an unknown key would have stopped it), and the daemon's start time was *after* the file's mtime — so it definitely read it. A freshly created container still bound `0.0.0.0`. **On Docker 29.7.2 that setting is inert.** The key was reverted rather than left in place: a config line that looks like protection but is not is worse than no line at all.
+
+      **What worked:** `DOCKER-USER`, Docker's own extension point — evaluated before Docker's `FORWARD` rules, and never overwritten by Docker.
+      ```sh
+      iptables -I DOCKER-USER 1 -i eth0 -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
+      iptables -I DOCKER-USER 2 -i eth0 -j DROP
+      ```
+      Applied to **both** families, and installed as `/usr/local/sbin/docker-user-firewall` behind a `docker-user-firewall.service` unit ordered `After=docker.service`. That unit is not optional bureaucracy: iptables rules do not survive a reboot, and Docker recreates `DOCKER-USER` on start, so a one-off `iptables -I` silently evaporates.
+
+      **Why this does not break anything.** The rule only matches traffic *forwarded* in on the public interface:
+
+      | Path | Interface | Effect |
+      |---|---|---|
+      | nginx → container | host-originated, never traverses `FORWARD` | unaffected |
+      | container → internet | arrives on `docker0`, not `eth0` | unaffected |
+      | return traffic for the above | `eth0`, `ESTABLISHED` | matched by rule 1, returns |
+      | internet → published port | `eth0`, `NEW` | **dropped** |
+
+      Verified after applying: the ports time out, production still 200, staging still 401 through nginx, container egress still works, and a fresh SSH connection still lands.
+
+      > Check with `ss -tlnp` and an **external** `curl`, never `ufw status`. The container ports still appear as `0.0.0.0` in `docker ps` and `ss` — the socket really is open on the host; it is the forwarding path from outside that is now blocked. Anything that only reads the listen socket will report this as still exposed.
 - [x] **SSH password auth already disabled** — Hetzner's image ships key-only. Verified the *effective* config, not the file:
       ```
       passwordauthentication no      permitrootlogin without-password
