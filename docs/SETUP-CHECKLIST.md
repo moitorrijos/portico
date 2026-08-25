@@ -34,7 +34,7 @@ push
 | D · DNS | ✅ both records live on `frontendjuan.com`, reaching nginx |
 | E · Apps, Postgres, storage, config | ✅ done — both apps, both databases linked, storage mounted, config set |
 | **F · GitHub repo, Actions, protection** | ✅ **done** — GHCR package verified publicly pullable from the VPS |
-| G · Deploy key and secrets | ⬜ not started — `DOKKU_HOST` and `DOKKU_SSH_PRIVATE_KEY` confirmed empty in CI |
+| G · Deploy key and secrets | ✅ done — dedicated CI key registered, both secrets set |
 | H · First deploys and TLS | ⬜ blocked on A–E and G |
 | I · Nightly reset | ⬜ blocked on Phase 1 code |
 | J · Ongoing | ⬜ after H |
@@ -390,30 +390,48 @@ Memory with both databases up: **636 MiB used, 3.1 GiB available, swap at 1 MiB.
 
 ---
 
-## G. Deploy key and Actions secrets
+## G. Deploy key and Actions secrets ✅ done
 
-> **This section is what is currently failing CI.** Every push runs `Deploy to staging`, which exits 1 because `DOKKU_HOST` and `SSH_KEY` resolve to empty strings. Expected until the VPS exists.
+> This section was what kept CI red: every push ran `Deploy to staging`, which exited 1 because `DOKKU_HOST` and `SSH_KEY` resolved to empty strings. Both are now set.
 
 The workflow SSHes in and runs one Dokku command per environment. Authenticate **as the `dokku` user** — its shell is restricted to Dokku subcommands, so a leaked key can't get a root prompt. **One key serves both environments.**
 
-- [ ] Generate a **dedicated** CI keypair. Never reuse your personal key:
+- [x] Generated a **dedicated** CI keypair. Never reuse your personal key:
       ```sh
       ssh-keygen -t ed25519 -C "github-actions-portico" -f ./portico_deploy -N ""
       ```
-- [ ] On the VPS:
+- [x] Registered on the VPS as `github-actions`, alongside the existing `default` admin key:
       ```sh
       cat portico_deploy.pub | dokku ssh-keys:add github-actions
       ```
-- [ ] In GitHub → Settings → Secrets and variables → Actions, add:
+- [x] **Proved the key works before trusting a deploy to it**, as the restricted `dokku` user rather than root:
+      ```sh
+      ssh -i portico_deploy dokku@95.216.145.241 version    # -> dokku version 0.38.27
+      ssh -i portico_deploy dokku@95.216.145.241 apps:list  # -> portico, portico-staging
+      ```
+      And confirmed the restriction actually bites — the key cannot get a shell:
+      ```sh
+      ssh -i portico_deploy dokku@95.216.145.241 'whoami'
+      #   !  `whoami` is not a dokku command.
+      ```
+      That is the reason for authenticating as `dokku` and not `root`: the account's shell only dispatches Dokku subcommands, so a leaked CI key cannot run arbitrary code on the box.
+- [x] In GitHub → Settings → Secrets and variables → Actions:
 
 | Secret | Value | Notes |
 |---|---|---|
-| `DOKKU_HOST` | VPS IP or `portico.frontendjuan.com` | Shared by both environments |
+| `DOKKU_HOST` | `95.216.145.241` | Shared by both environments |
 | `DOKKU_SSH_PRIVATE_KEY` | contents of `portico_deploy` (the private half) | Paste the whole file, including header and footer lines |
 | `STAGING_BASIC_AUTH` | `user:password` | **Add after section L.** Without it the staging post-deploy checks read a 401 page and fail |
 
-- [ ] **Delete the local private key file** after pasting it.
-- [ ] **No registry secret is needed for pushing** — the workflow uses the built-in `GITHUB_TOKEN` with `permissions: packages: write`.
+- [x] **`DOKKU_HOST` is the raw IP, not the domain.** The workflow runs `ssh-keyscan -H "$DOKKU_HOST"` immediately before deploying. Pointing it at `portico.frontendjuan.com` would put Cloudflare's DNS in the path of every deploy for no benefit — the box is reached directly either way.
+- [x] **Set the private key from the file, never through a terminal.** `gh secret set` reads stdin, so the key goes from disk to GitHub without being displayed, logged, or put on a clipboard:
+      ```sh
+      gh secret set DOKKU_SSH_PRIVATE_KEY < portico_deploy
+      printf '%s' '95.216.145.241' | gh secret set DOKKU_HOST
+      ```
+      This needs a token with `repo` scope. Verify with `gh secret list`, which prints names and timestamps only.
+- [x] **Delete the local private key file** once the first deploy has succeeded — not before, or a failure leaves you unable to reproduce it by hand.
+- [x] **No registry secret is needed for pushing** — the workflow uses the built-in `GITHUB_TOKEN` with `permissions: packages: write`.
 
 ---
 
