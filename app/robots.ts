@@ -1,5 +1,7 @@
 import type { MetadataRoute } from "next";
 
+import { isPubliclyIndexable } from "@/lib/indexing";
+
 /**
  * MUST be request-time. `robots.ts` is a Route Handler that Next caches and
  * prerenders by default -- without this, the build-time value of APP_ENV would
@@ -42,10 +44,9 @@ const AI_CRAWLERS = [
 ];
 
 export default function robots(): MetadataRoute.Robots {
-  const isProduction = process.env.APP_ENV === "production";
-
-  // Staging: nothing is crawlable, by anyone.
-  if (!isProduction) {
+  // Staging, and production before launch: nothing is crawlable, by anyone.
+  // Same single policy the X-Robots-Tag header uses, so the two cannot drift.
+  if (!isPubliclyIndexable()) {
     return {
       rules: [
         { userAgent: "*", disallow: "/" },
@@ -54,7 +55,7 @@ export default function robots(): MetadataRoute.Robots {
     };
   }
 
-  // Production: the marketing pages are the indexable surface (spec 9). The
+  // Launched production: the marketing pages are the indexable surface. The
   // authenticated trees are not, and are additionally covered by the
   // X-Robots-Tag header set in proxy.ts.
   return {

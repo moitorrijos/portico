@@ -476,21 +476,45 @@ Do **staging first.** That's the entire point of having it — find the broken S
 
 ### H2. Production
 
+- [ ] ⚠️ **Release with a merge commit, not a squash.** `main` is an ancestor of `develop`, so a merge keeps it a true superset and every later release stays a clean fast-forward. Squashing would collapse the history into one new SHA and permanently diverge the two branches, so the *next* release PR replays everything and conflicts. Feature PRs stay squash-only; this exception is release PRs only.
 - [ ] Merge `develop` into `main`. Watch `deploy-production`.
 - [ ] Enable TLS:
       ```sh
-      dokku letsencrypt:set portico email <confirm-which-address>
+      dokku letsencrypt:set portico email juanmtorrijos@gmail.com
       dokku letsencrypt:enable portico
       ```
       **Decide which address gets cert-expiry notices.** The git committer identity on this repo is `juanmtorrijos@gmail.com`; the session context showed `juanm@intermaritime.org`. For a personal portfolio project the personal address is probably right — but it's your call, and it's the address that emails you when renewal breaks.
-- [ ] Confirm indexability is the *right way round*:
+- [ ] ⚠️ **Production ships with indexing held back, on purpose.** `ALLOW_INDEXING` is deliberately **not set** on the `portico` app, so the whole site is served `noindex` even though `APP_ENV=production`. The marketing site is Phase 4; until then the live domain serves a placeholder, and a placeholder indexed under the real domain is worse than no listing — search engines cache it, and the first impression a prospect gets from a search result is one you do not control the timing of.
+
+      So before launch, indexability is the *same* as staging:
+      ```sh
+      curl -sI https://portico.frontendjuan.com/ | grep -i x-robots-tag  # expect noindex
+      curl -s  https://portico.frontendjuan.com/robots.txt               # expect Disallow: /
+      ```
+
+- [ ] **To launch, when the real marketing site ships**, one command and nothing else:
+      ```sh
+      dokku config:set portico ALLOW_INDEXING=true
+      ```
+      Then confirm indexability is the *right way round*:
       ```sh
       curl -sI https://portico.frontendjuan.com/       | grep -i x-robots-tag  # expect NOTHING
       curl -sI https://portico.frontendjuan.com/app    | grep -i x-robots-tag  # expect noindex
       curl -sI https://portico.frontendjuan.com/portal | grep -i x-robots-tag  # expect noindex
       curl -s  https://portico.frontendjuan.com/robots.txt                     # expect Allow: /
       ```
-      A `noindex` on `/` means `APP_ENV` isn't set to `production`. The workflow fails the job on this, but verify once by hand.
+      **There is only one place to change.** `lib/indexing.ts` reads `ALLOW_INDEXING` at runtime, and the `deploy-production` job reads the *same variable off the app over SSH* to decide what to assert — so the check flips with the config instead of having to be remembered separately.
+
+      Verified across all four states before shipping (`pnpm build && pnpm start`):
+
+      | `APP_ENV` | `ALLOW_INDEXING` | `/` | `robots.txt` |
+      |---|---|---|---|
+      | `production` | *(unset)* | `noindex` | `Disallow: /` |
+      | `production` | `true` | *(none)* | `Allow: /` |
+      | `production` | `TRUE` | `noindex` | `Disallow: /` |
+      | `staging` | `true` | `noindex` | `Disallow: /` |
+
+      The third row is the one that matters: a wrong-case value **fails closed** rather than publishing. `/app` is `noindex` in every row.
 - [ ] Seed each environment once:
       ```sh
       dokku run portico-staging pnpm tsx scripts/seed.ts
