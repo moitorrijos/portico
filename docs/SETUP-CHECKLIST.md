@@ -35,11 +35,11 @@ push
 | E · Apps, Postgres, storage, config | ✅ done — both apps, both databases linked, storage mounted, config set |
 | **F · GitHub repo, Actions, protection** | ✅ **done** — GHCR package verified publicly pullable from the VPS |
 | G · Deploy key and secrets | ✅ done — dedicated CI key registered, both secrets set |
-| H · First deploys and TLS | ⬜ blocked on A–E and G |
-| I · Nightly reset | ⬜ blocked on Phase 1 code |
+| H · First deploys and TLS | 🟡 **H1 staging live over TLS**; H2 production not deployed |
+| I · Nightly reset | ⬜ blocked on Phase 1 — `scripts/reset-demo.ts` does not exist yet |
 | J · Ongoing | ⬜ after H |
 | K · Asset sourcing | ⬜ parallel, blocks nothing |
-| L · Staging lockdown | ⬜ after H1 |
+| L · Staging lockdown | ✅ done — basic auth on, verified 401 anonymous / 200 authenticated |
 
 **CI is green through `build`.** The `Deploy to staging` job fails on every push, which is correct and expected — the log shows `DOKKU_HOST:` and `SSH_KEY:` empty. It will stay red until G is done, and that is a signal, not noise to suppress.
 
@@ -439,25 +439,40 @@ The workflow SSHes in and runs one Dokku command per environment. Authenticate *
 
 Do **staging first.** That's the entire point of having it — find the broken SSH key or the wrong GHCR visibility on the environment nobody is looking at.
 
-### H1. Staging
+### H1. Staging ✅ done — live at <https://portico-staging.frontendjuan.com>
 
-- [ ] Push to `develop` and watch the run: `check` → `build` → `deploy-staging`.
-- [ ] `git:from-image <app> <docker-image>` is the exact signature. It updates the app's git repo to point at the image, which triggers the deploy. **The host must be able to pull the image** (hence F).
-- [ ] Enable TLS now that a container is running:
+- [x] Merged into `develop` and watched the run: `check` → `build` → `deploy-staging`. The app deployed on the first attempt; `dokku ps:report` showed `Deployed: true`, `Running: true`.
+- [x] `git:from-image <app> <docker-image>` is the exact signature. It updates the app's git repo to point at the image, which triggers the deploy. **The host must be able to pull the image** (hence F).
+- [x] Confirmed the running container is the right build — `/api/health` returned the deployed commit's own sha, not merely `ok`:
       ```sh
-      dokku letsencrypt:set portico-staging email <confirm-which-address>
+      curl -s https://portico-staging.frontendjuan.com/api/health
+      # {"status":"ok","sha":"6cbdcab..."}
+      ```
+- [x] Enabled TLS once a container was running:
+      ```sh
+      dokku letsencrypt:set portico-staging email juanmtorrijos@gmail.com
       dokku letsencrypt:enable portico-staging
       dokku letsencrypt:cron-job --add   # global; only needs adding once
       ```
-- [ ] Confirm staging is **not** indexable:
+      HTTP-01 validated first try. `letsencrypt:list` shows expiry **2026-11-23**, renewal at 59 days, and `/etc/cron.d`-equivalent entry `@daily .../letsencrypt/cron-job` in dokku's crontab.
+- [x] Confirmed staging is **not** indexable, over real HTTPS:
       ```sh
       curl -sI https://portico-staging.frontendjuan.com/ | grep -i x-robots-tag
-      #   expect: noindex, nofollow, noarchive, nosnippet, noimageindex
+      #   noindex, nofollow, noarchive, nosnippet, noimageindex
       curl -s  https://portico-staging.frontendjuan.com/robots.txt
-      #   expect: Disallow: /   (for * and for the named AI crawlers)
+      #   Disallow: /   for * and for each named AI crawler
+      curl -sI http://portico-staging.frontendjuan.com/   # 301 -> https
       ```
-      The workflow asserts both automatically and fails the job if either is missing — but check by hand once, so you've seen it with your own eyes.
-- [ ] Now do **section L** before leaving staging exposed.
+- [x] ⚠️ **The first deploy's verification step WILL fail, and that is an ordering trap, not a bug in the app.** The post-deploy checks use `https://`, but TLS cannot be enabled until a container is already running to answer the HTTP-01 challenge. So run one is always: deploy succeeds → verification fails with
+
+      ```
+      curl: (35) OpenSSL/3.0.13: error:0A000458:SSL routines::tlsv1 unrecognized name
+      ```
+
+      Enable TLS, then re-run the job. **Check the deploy step's own result before believing the job's red X** — the app was live and correct the whole time.
+
+      The workflow used to report this as `FAIL: staging root is missing a noindex X-Robots-Tag. Check APP_ENV`, which pointed at entirely the wrong thing. Its readiness loop swallowed the connection failure, and every check below reads a header out of a response — where an unreachable host and a misconfigured app both yield an empty string. Fixed: the loop now fails loudly and prints curl's own error.
+- [x] Then **section L**, before leaving staging exposed.
 
 ### H2. Production
 
@@ -506,24 +521,25 @@ Do **staging first.** That's the entire point of having it — find the broken S
 
 `robots.txt` and `X-Robots-Tag` are **requests, not barriers.** A crawler that ignores one ignores the other, and several AI scrapers ignore both. Basic auth is the only layer here that actually enforces anything.
 
-- [ ] Enable it:
+- [x] Enabled, username **`portico`**, 24-character random alphanumeric password:
       ```sh
-      dokku http-auth:enable portico-staging <username> <strong-password>
+      dokku http-auth:enable portico-staging portico <strong-password>
       ```
-- [ ] Verify it bites:
+      Alphanumeric deliberately — the password travels through `curl -u user:pass` and a GitHub secret, and `:` `@` `/` in a password make both of those ambiguous.
+- [x] Verified it actually bites, both directions:
       ```sh
-      curl -so /dev/null -w '%{http_code}\n' https://portico-staging.frontendjuan.com/   # expect 401
-      curl -so /dev/null -w '%{http_code}\n' -u user:pass \
-           https://portico-staging.frontendjuan.com/                                     # expect 200
+      curl -so /dev/null -w '%{http_code}\n' https://portico-staging.frontendjuan.com/   # 401
+      curl -so /dev/null -w '%{http_code}\n' -u portico:<pass> \
+           https://portico-staging.frontendjuan.com/                                     # 200
       ```
-- [ ] Add the credentials as the `STAGING_BASIC_AUTH` secret (`user:password`) so the workflow's post-deploy checks can read past the 401.
-- [ ] Note: **Dokku's own healthchecks bypass nginx**, hitting the container directly — so basic auth does not break zero-downtime deploys. Only external checks need credentials.
-- [ ] Useful extras:
+- [x] Credentials added as the `STAGING_BASIC_AUTH` secret (`portico:<password>`) so the workflow's post-deploy checks can read past the 401. **Set this before re-running a deploy**, or the checks read a 401 body and fail.
+- [x] **Dokku's own healthchecks bypass nginx**, hitting the container directly — so basic auth does not break zero-downtime deploys. Only external checks need credentials.
+- [ ] Optional: skip the prompt for yourself:
       ```sh
       dokku http-auth:report portico-staging            # confirm what's active
-      dokku http-auth:add-allowed-ip portico-staging <your-home-ip>   # skip the prompt for yourself
+      dokku http-auth:add-allowed-ip portico-staging <your-home-ip>
       ```
-- [ ] Sanity check you have **not** enabled it on production: `dokku http-auth:report portico` should show it disabled. The whole value of the piece is a prospect clicking a link with no barrier.
+- [x] Confirmed it is **not** enabled on production — `dokku http-auth:report portico` reports `Http auth enabled: false`. The whole value of the piece is a prospect clicking a link with no barrier.
 
 ---
 
