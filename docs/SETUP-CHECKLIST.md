@@ -32,7 +32,7 @@ push
 | B · Hardening | ✅ except the **firewall**, still inactive |
 | C · Dokku install | ✅ v0.38.27 + Docker + nginx, via the official bootstrap |
 | D · DNS | ✅ both records live on `frontendjuan.com`, reaching nginx |
-| E · Apps, Postgres, storage, config | ⬜ next — bare `portico` app exists |
+| E · Apps, Postgres, storage, config | 🟡 in progress — `portico` app and `portico-db` exist; staging and all config outstanding |
 | **F · GitHub repo, Actions, protection** | ✅ **done** except making the GHCR package public |
 | G · Deploy key and secrets | ⬜ not started — `DOKKU_HOST` and `DOKKU_SSH_PRIVATE_KEY` confirmed empty in CI |
 | H · First deploys and TLS | ⬜ blocked on A–E and G |
@@ -166,12 +166,34 @@ Verified on the box, not assumed.
 - [x] Catch-all vhost at `/etc/nginx/conf.d/00-default-vhost.conf`; nginx's conflicting `sites-enabled/default` removed.
 
       It answers unknown Host headers with `444` (close, no response). **An unmatched hostname returning nothing is correct**, not a fault — before this, nginx's "Welcome to nginx" page answered on every hostname pointed at the box. A deployed app with no vhost yet also falls through to this, so `HTTP 000` before the first deploy is expected.
-- [ ] Remaining plugins, installed in section E:
+- [x] Remaining plugins installed — `postgres` 1.48.0, `letsencrypt` 0.25.1, and `http-auth` 0.13.0 (the last needed for section L):
       ```sh
       sudo dokku plugin:install https://github.com/dokku/dokku-postgres.git postgres
       sudo dokku plugin:install https://github.com/dokku/dokku-letsencrypt.git
       ```
-      `dokku-http-auth` is **already installed** (needed for section L).
+- [x] ⚠️ **`enabled` in `plugin:list` does not mean the plugin is installed.** The postgres plugin cloned fine and reported `enabled`, but `postgres:create` then failed with:
+      ```
+      mkdir: cannot create directory '/var/lib/dokku/services': Permission denied
+      ```
+      A plugin's `install` trigger is a separate step from the clone. The postgres one pulls **five** images (`postgres`, `busybox`, `ambassador`, `s3backup`, `wait`) under `set -eo pipefail` *before* it creates any directory, so a single failed pull aborts it — leaving the plugin enabled but with no data root and no sudoers file. Here only `postgres:18.4` had landed; the other four were absent, so it died on the second pull.
+
+      The permission error is a symptom, not the cause. **`/var/lib/dokku` is `root:root`**, so only root can create `services/` — and the trigger that would have done it never got that far. Running as root does not help, because the missing step is the trigger, not the `mkdir`.
+
+      Recovery — no arguments, which re-runs the `install` trigger for **every** enabled plugin and is idempotent:
+      ```sh
+      sudo dokku plugin:install
+      ```
+      Give it several minutes; it re-attempts every pull. Killing it partway is how the box got into this state to begin with.
+
+      Verify all three artifacts, not just the first:
+      ```sh
+      ls -l  /etc/sudoers.d/dokku-postgres          # 0440 root:root
+      ls -ld /var/lib/dokku/services/postgres       # dokku:dokku
+      ls -ld /var/lib/dokku/config/postgres         # dokku:dokku
+      ```
+      `services/` itself staying `root:root` is correct — only the leaf is chowned.
+
+      > Plugins whose data root sits under `/var/lib/dokku/data/` (`letsencrypt`, `http-auth`) are **not** affected by this failure mode: that directory is already `dokku`-owned, so their triggers succeed where postgres's cannot. A working letsencrypt is no evidence that postgres installed.
 
 ---
 
