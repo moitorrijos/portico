@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { isPubliclyIndexable } from "@/lib/indexing";
+
 /**
  * Per-request edge/node hook (Next 16 renamed `middleware.ts` to `proxy.ts`).
  *
@@ -22,18 +24,20 @@ const PRIVATE_TREES = ["/app", "/portal"];
 export function proxy(request: NextRequest) {
   const response = NextResponse.next();
 
-  // Fail closed: anything that is not explicitly production is treated as
-  // staging and marked noindex in its entirety. Forgetting to set
-  // APP_ENV=production makes production invisible to search -- which is the
-  // safe direction to fail, but see docs/DEPLOY.md, it is a real footgun.
-  const isProduction = process.env.APP_ENV === "production";
+  // Fail closed on both gates: the environment must be production AND the
+  // content must have been declared ready (see lib/indexing.ts). Anything else
+  // -- staging, a typo, an unset variable -- is marked noindex in its entirety.
+  // Failing this direction hides a site that should be visible, which is
+  // recoverable; failing the other way publishes one that should not be, which
+  // is not. See docs/DEPLOY.md.
+  const indexable = isPubliclyIndexable();
 
   const { pathname } = request.nextUrl;
   const isPrivate = PRIVATE_TREES.some(
     (tree) => pathname === tree || pathname.startsWith(`${tree}/`),
   );
 
-  if (!isProduction || isPrivate) {
+  if (!indexable || isPrivate) {
     response.headers.set("X-Robots-Tag", NOINDEX);
   }
 

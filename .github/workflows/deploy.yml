@@ -81,7 +81,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: staging
-      url: https://staging-portico.frontendjuan.com
+      url: https://portico-staging.frontendjuan.com
     steps:
       - name: Deploy
         env:
@@ -107,7 +107,7 @@ jobs:
           STAGING_BASIC_AUTH: ${{ secrets.STAGING_BASIC_AUTH }}
         run: |
           set -euo pipefail
-          URL=https://staging-portico.frontendjuan.com
+          URL=https://portico-staging.frontendjuan.com
 
           # A wrapper rather than an array: empty-array expansion under `set -u`
           # errors on bash < 4.4, and this stays correct on any version.
@@ -120,10 +120,26 @@ jobs:
           }
           [ -n "${STAGING_BASIC_AUTH:-}" ] && echo "Using basic auth for staging checks."
 
-          # Give the container a moment to finish the swap.
+          # Give the container a moment to finish the swap. This loop MUST fail
+          # loudly when it never succeeds: every check below reads a header out
+          # of a response, and an unreachable host produces the same empty
+          # string as a misconfigured app. Without this the job blamed APP_ENV
+          # for what was actually a TLS handshake failure -- which is exactly
+          # how the very first deploy fails, because letsencrypt can only be
+          # enabled once a container is already running (checklist section H).
+          READY=false
           for i in $(seq 1 30); do
-            fetch -sfo /dev/null "$URL/api/health" && break || sleep 2
+            if fetch -sfo /dev/null "$URL/api/health"; then READY=true; break; fi
+            sleep 2
           done
+          if [ "$READY" != true ]; then
+            echo "FAIL: $URL/api/health never answered after 60s." >&2
+            echo "--- curl's own error ---" >&2
+            fetch -sS -o /dev/null "$URL/api/health" >&2 || true
+            echo "A TLS error here means letsencrypt is not enabled for this app yet." >&2
+            echo "A 401 means STAGING_BASIC_AUTH is missing or wrong." >&2
+            exit 1
+          fi
 
           echo "--- X-Robots-Tag on / ---"
           HEADER=$(fetch -sSI "$URL/" | tr -d '\r' | grep -i '^x-robots-tag:' || true)
@@ -165,23 +181,63 @@ jobs:
           ssh "dokku@$DOKKU_HOST" git:from-image "$DOKKU_APP" "$IMAGE"
 
       - name: Verify production indexability is correct
+        env:
+          DOKKU_HOST: ${{ secrets.DOKKU_HOST }}
         run: |
           set -euo pipefail
           URL=https://portico.frontendjuan.com
-          for i in $(seq 1 30); do
-            curl -sfo /dev/null "$URL/api/health" && break || sleep 2
-          done
 
-          # Marketing must be indexable -- a stray noindex here would quietly
-          # deindex the site, which is the failure nobody notices for weeks.
-          echo "--- / (expect NO noindex) ---"
+          # This must fail loudly rather than fall through. The "/ must NOT be
+          # noindex" check below reads success from an EMPTY header -- and an
+          # unreachable host also produces an empty header. Without this gate a
+          # production site that is completely down reports a green deploy on
+          # the one check whose whole job is catching silent deindexing.
+          READY=false
+          for i in $(seq 1 30); do
+            if curl -sfo /dev/null "$URL/api/health"; then READY=true; break; fi
+            sleep 2
+          done
+          if [ "$READY" != true ]; then
+            echo "FAIL: $URL/api/health never answered after 60s." >&2
+            echo "--- curl's own error ---" >&2
+            curl -sS -o /dev/null "$URL/api/health" >&2 || true
+            echo "A TLS error here means letsencrypt is not enabled for this app yet." >&2
+            exit 1
+          fi
+
+          # What SHOULD / look like? Ask the app, not a flag duplicated in CI.
+          # ALLOW_INDEXING on the Dokku app is the single source of truth that
+          # lib/indexing.ts reads at runtime; reading the same variable here
+          # means this assertion can never drift out of step with the app's
+          # actual behaviour. Anything other than exactly "true" -- including
+          # unset -- means we expect the site to be hidden.
+          ALLOW=$(ssh "dokku@$DOKKU_HOST" config:get portico ALLOW_INDEXING 2>/dev/null || true)
+          echo "ALLOW_INDEXING on portico: '${ALLOW:-<unset>}'"
+
+          echo "--- / ---"
           ROOT=$(curl -sSI "$URL/" | tr -d '\r' | grep -i '^x-robots-tag:' || true)
-          echo "${ROOT:-<none, correct>}"
-          case "$ROOT" in
-            *noindex*) echo "FAIL: production marketing page is noindex." \
-                            "APP_ENV is probably not set to 'production'." >&2
-                       exit 1 ;;
-          esac
+          echo "${ROOT:-<none>}"
+
+          if [ "$ALLOW" = "true" ]; then
+            # Launched. A stray noindex here would quietly deindex the site,
+            # which is the failure nobody notices for weeks.
+            case "$ROOT" in
+              *noindex*) echo "FAIL: production marketing page is noindex, but" \
+                              "ALLOW_INDEXING=true says it should be public." \
+                              "Check APP_ENV on the portico app." >&2
+                         exit 1 ;;
+              *) echo "OK: / is indexable, as intended" ;;
+            esac
+          else
+            # Pre-launch. The placeholder must stay out of search results, and
+            # this asserts it rather than trusting that it happened.
+            case "$ROOT" in
+              *noindex*) echo "OK: / is held back from indexing (ALLOW_INDEXING is not 'true')" ;;
+              *) echo "FAIL: / is indexable, but ALLOW_INDEXING is not 'true'." \
+                      "The placeholder is being exposed to search engines." >&2
+                 exit 1 ;;
+            esac
+          fi
 
           # The authenticated trees must NOT be indexable.
           echo "--- /app (expect noindex) ---"

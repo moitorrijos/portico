@@ -1,26 +1,248 @@
 @import "tailwindcss";
 
+/* ===========================================================================
+   Pórtico token layer
+   ---------------------------------------------------------------------------
+   Tailwind v4 is CSS-first, so this file IS the design system config. There is
+   no tailwind.config.js and none should be created.
+
+   Every colour below comes from porticospec.md §8, which was contrast-
+   validated against THIS warm ivory ground -- not against white. Two values
+   in the documented default palette failed on the warmer surface and were
+   corrected. Do not substitute by eye.
+   =========================================================================== */
+
+/* Dark mode is an explicit attribute, never a bare media query. The inline
+   script in app/layout.tsx resolves stored choice -> system preference ->
+   light, and stamps data-theme before first paint. That leaves exactly ONE
+   dark block to maintain instead of two that silently drift apart. Without JS
+   the page renders light: a degradation, not a break. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ---------------------------------------------------------------------------
+   LIGHT — warm ivory
+   --------------------------------------------------------------------------- */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --ground:       #FAF8F4;  /* never pure white */
+  --surface:      #F3F0E9;  /* recessed step: insets, table headers, wells */
+  --ink:          #0B0B0B;
+  --ink-2:        #52514E;
+  --ink-muted:    #898781;
+  --rule:         #E1E0D9;  /* hairlines only -- no card shadows, ever */
+  --accent:       #2A78D6;
+  --accent-ink:   #FAF8F4;  /* text ON accent */
+
+  /* Sequential / single-series ramp, light end first.
+     Starts one step darker than the documented default #86B6EF, which
+     measures 1.99:1 here and fails the 2:1 light-end floor. #6DA7EC passes
+     at 2.36:1. This correction is one of the case-study sections. */
+  --seq-1: #6DA7EC;
+  --seq-2: #3987E5;
+  --seq-3: #256ABF;
+  --seq-4: #184F95;
+
+  /* Categorical slot 2, only if a second series ever appears. Cap at three
+     and fold the tail into "Other". */
+  --series-2: #EB6834;
 }
 
+/* ---------------------------------------------------------------------------
+   DARK — warm charcoal. Designed, not inverted: its own steps, validated
+   separately. Note the surface step goes UP here and DOWN in light, because
+   an inset reads recessed on a light ground and a panel reads lifted on a
+   dark one. Inverting the light values would get this backwards.
+   --------------------------------------------------------------------------- */
+[data-theme="dark"] {
+  --ground:       #1A1815;
+  --surface:      #211F1C;  /* raised step */
+  --ink:          #FFFFFF;
+  --ink-2:        #C3C2B7;
+  --ink-muted:    #898781;  /* holds in both modes */
+  --rule:         #2C2C2A;
+  --accent:       #3987E5;
+  --accent-ink:   #0B0B0B;
+
+  /* Light end 2.19:1 on #1A1815 -- passes. */
+  --seq-1: #CDE2FB;
+  --seq-2: #86B6EF;
+  --seq-3: #3987E5;
+  --seq-4: #184F95;
+
+  --series-2: #D95926;
+}
+
+/* ---------------------------------------------------------------------------
+   STATUS — reserved. Never reused as a series colour.
+   Identical in both modes on purpose. On the light ivory, warning and serious
+   sit below 3:1, so status is ALWAYS shipped as icon + label + colour. The
+   pairing is doing real work here, not decoration -- see components/ui/status.
+   --------------------------------------------------------------------------- */
+:root {
+  --status-good:     #0CA30C;
+  --status-warning:  #FAB219;
+  --status-serious:  #EC835A;
+  --status-critical: #D03B3B;
+}
+
+/* ---------------------------------------------------------------------------
+   Expose roles to Tailwind. `inline` so utilities reference the var() directly
+   and the data-theme swap works at runtime rather than being compiled in.
+   --------------------------------------------------------------------------- */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-ground:     var(--ground);
+  --color-surface:    var(--surface);
+  --color-ink:        var(--ink);
+  --color-ink-2:      var(--ink-2);
+  --color-ink-muted:  var(--ink-muted);
+  --color-rule:       var(--rule);
+  --color-accent:     var(--accent);
+  --color-accent-ink: var(--accent-ink);
+
+  --color-seq-1: var(--seq-1);
+  --color-seq-2: var(--seq-2);
+  --color-seq-3: var(--seq-3);
+  --color-seq-4: var(--seq-4);
+  --color-series-2: var(--series-2);
+
+  --color-good:     var(--status-good);
+  --color-warning:  var(--status-warning);
+  --color-serious:  var(--status-serious);
+  --color-critical: var(--status-critical);
+
+  /* Two families, two weights each (400/500). No bold anywhere: §7 wants
+     hierarchy from size and spacing, not weight and colour. */
+  --font-sans:    var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-playfair), ui-serif, Georgia, serif;
+
+  /* Plus Jakarta Sans carries everything functional -- all UI, all data, all
+     numbers. It has real tabular figures, which is the whole reason it owns
+     the data (see app/layout.tsx). Four sizes, chosen for dense tables first
+     and marketing body second, because the dense case is the one that
+     breaks. */
+  --text-caption:               0.75rem;   /* 12px — axis ticks, table meta */
+  --text-caption--line-height:  1.4;
+  --text-body:                  0.875rem;  /* 14px — UI default, table cells */
+  --text-body--line-height:     1.5;
+  --text-lead:                  1.125rem;  /* 18px — marketing body */
+  --text-lead--line-height:     1.55;
+  --text-title:                 1.5rem;    /* 24px — in-app section heads */
+  --text-title--line-height:    1.25;
+
+  /* Playfair Display is the editorial voice and is NEVER allowed near a
+     number in a column -- it has no tabular figures, so that is a structural
+     limit, not a preference. Floor of 28px: below that its hairline strokes
+     go fragile and muddy on the ivory. */
+  --text-display-sm:               2rem;    /* 32px */
+  --text-display-sm--line-height:  1.15;
+  --text-figure:                   3.5rem;  /* 56px — the hero occupancy number */
+  --text-figure--line-height:      1;
+  --text-display:                  2.75rem; /* 44px */
+  --text-display--line-height:     1.1;
+  --text-display-lg:               4rem;    /* 64px — marketing hero */
+  --text-display-lg--line-height:  1.05;
+
+  /* Three spacing values. The whole point: constraint is what will make it
+     look expensive. Tailwind's numeric scale still exists for genuine
+     one-offs (hairlines, optical nudges) but these are the defaults. */
+  --spacing-tight: 0.5rem;  /*  8px */
+  --spacing-base:  1rem;    /* 16px */
+  --spacing-loose: 2rem;    /* 32px */
+
+  /* One radius. */
+  --radius-base: 4px;
+
+  /* Motion confirms a state change and nothing else. 200–300ms, eased, no
+     springs. */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* ---------------------------------------------------------------------------
+   Base
+   --------------------------------------------------------------------------- */
+@layer base {
+  html {
+    /* Stops iOS inflating text in landscape, which wrecks dense tables. */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Hairlines are the only separator, so they must be exact. */
+  * {
+    border-color: var(--rule);
+  }
+
+  ::selection {
+    background-color: var(--accent);
+    color: var(--accent-ink);
+  }
+
+  /* Visible focus everywhere, not just where it was remembered. */
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-base);
+  }
+
+  /* Tables: real semantics, and figures that line up. */
+  th {
+    text-align: left;
+    font-weight: 500;
+  }
+
+  /* Form controls inherit the type system instead of the UA's. */
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+    color: inherit;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ---------------------------------------------------------------------------
+   Utilities
+   --------------------------------------------------------------------------- */
+
+/* The connective device between the dense app and the marketing pages: a
+   small, tracked, muted label that names what kind of thing you are looking
+   at. Used for table column heads and section eyebrows. Structure carrying
+   information rather than decorating it. */
+@utility eyebrow {
+  font-size: var(--text-caption);
+  line-height: 1.4;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+/* Figures that must align down a column. §8 reserves this for table columns
+   and axis ticks ONLY -- the hero figure and stat-tile values use
+   proportional figures on purpose. */
+@utility figures-tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* ---------------------------------------------------------------------------
+   Reduced motion — a real path, not a nod to one.
+   --------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

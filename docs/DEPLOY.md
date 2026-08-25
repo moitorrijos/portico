@@ -9,7 +9,7 @@ One-time infrastructure setup lives in **[SETUP-CHECKLIST.md](./SETUP-CHECKLIST.
 | Branch | Dokku app | Domain | `APP_ENV` | Indexable |
 |---|---|---|---|---|
 | `main` | `portico` | `portico.frontendjuan.com` | `production` | Marketing yes; `/app` + `/portal` no |
-| `develop` | `portico-staging` | `staging-portico.frontendjuan.com` | `staging` | **Nothing.** Search and AI crawlers blocked |
+| `develop` | `portico-staging` | `portico-staging.frontendjuan.com` | `staging` | **Nothing.** Search and AI crawlers blocked |
 | PRs | — | — | — | Builds only, never deploys |
 
 Both apps run on the same VPS with **separate Postgres services** and separate storage mounts. Staging is never wired to production data.
@@ -29,7 +29,7 @@ push
      └─ deploy-production   [main only]    → portico          → verify indexability
 ```
 
-The VPS never compiles anything — `next build` is memory-hungry and would OOM or crawl on a small box. GitHub Actions builds, GHCR stores, Dokku pulls. Deploys take seconds and a broken build never reaches production.
+The VPS never compiles anything — `next build` is memory-hungry and CPU-hungry, and the box has 4 GB and 2 *shared* vCPUs to run two apps and two databases on. GitHub Actions builds, GHCR stores, Dokku pulls. Deploys take seconds and a broken build never reaches production.
 
 ### The image is environment-agnostic, on purpose
 
@@ -118,7 +118,7 @@ docker rm -f portico-stg portico-prod
 
 **`output: "standalone"`.** Emits a self-contained `server.js` with only traced runtime dependencies. The consequence to remember: **tracing only includes what the app imports.** Anything invoked as a CLI (the Prisma binary, `tsx`) is invisible to it and must be copied explicitly.
 
-**`images: { unoptimized: true }`.** Runtime image optimization on a small VPS is the wrong trade — sharp on glibc needs `MALLOC_ARENA_MAX` tuning to avoid runaway memory (flagged in Next's own self-hosting docs). `scripts/prep-images.ts` pre-generates AVIF/WebP variants at known dimensions instead, which meets the Lighthouse ≥95 budget without the runtime cost.
+**`images: { unoptimized: true }`.** Runtime image optimization is the wrong trade on a 4 GB box with 2 *shared* vCPUs: resizing is CPU-bound and competes with both app containers, and sharp on glibc needs `MALLOC_ARENA_MAX` tuning to avoid runaway memory (flagged in Next's own self-hosting docs). `scripts/prep-images.ts` pre-generates AVIF/WebP variants at known dimensions instead, which meets the Lighthouse ≥95 budget without the runtime cost.
 
 **Healthcheck at `/api/health`, `dynamic = "force-dynamic"`.** If it were statically prerendered the check would pass against a stale build rather than a live server.
 
@@ -203,6 +203,6 @@ ssh dokku@HOST git:from-image portico ghcr.io/<owner>/portico:<sha-currently-on-
 
 **Logs:** `dokku logs portico -t` · `dokku logs portico-staging -t`
 
-**Disk:** `docker system prune -af` monthly. Two apps plus two Postgres services fill a 40 GB volume with old layers noticeably faster than one.
+**Disk:** `docker system prune -af` monthly. Two apps plus two Postgres services accumulate old image layers noticeably faster than one.
 
 **No database backups.** The data is seeded and truncated nightly by design — backing it up would be theatre. Deliberate, not an oversight.

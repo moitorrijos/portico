@@ -7,3 +7,79 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+# Project conventions
+
+Everything above this line is generated and rewritten by `next dev`. Everything below is hand-maintained — keep additions here.
+
+## Branching
+
+`main` and `develop` are both **protected**: pull requests required, CI must pass, no direct pushes, no force-pushes, no deletions. Admin bypass is off, so these rules apply to everyone including the repo owner.
+
+```
+<type>/<short-kebab-description>        e.g. feat/design-tokens
+                                             fix/ci-typecheck-missing-next-types
+                                             docs/branching-and-commit-conventions
+```
+
+Flow: branch off `develop` → PR into `develop` → soak on staging → PR `develop` into `main` to release.
+
+| Branch | Deploys to | Domain |
+|---|---|---|
+| `develop` | `portico-staging` | `portico-staging.frontendjuan.com` |
+| `main` | `portico` | `portico.frontendjuan.com` |
+
+Merged branches auto-delete. **Feature PRs squash; release PRs merge.**
+
+`develop` → `main` is the one exception to squash-only, and it is deliberate.
+Squashing a release would collapse every commit into one new SHA on `main`,
+permanently diverging it from `develop` — so the next release PR replays the
+same history and conflicts. A merge commit keeps `main` a true superset, which
+makes every subsequent release a clean fast-forward.
+
+## Commit messages
+
+[Conventional Commits](https://www.conventionalcommits.org/). The squash-merge title becomes the commit subject, so the PR title must also follow the format.
+
+```
+<type>(<optional scope>): <imperative summary, no trailing period>
+
+<body: why, not what. Wrap at 72. State what was verified and how.>
+```
+
+Types: `feat` · `fix` · `docs` · `style` · `refactor` · `perf` · `test` · `build` · `ci` · `chore` · `revert`
+
+Scopes worth using here: `ci`, `deploy`, `auth`, `dal`, `ui`, `charts`, `seed`, `manager`, `portal`, `marketing`, `config`.
+
+## Verify before claiming
+
+CI has already caught one works-on-my-machine failure: `pnpm typecheck` passed locally and failed on every Actions run, because `LayoutProps` is a generated global in `.next/types/` and `.next/` is gitignored. Local success is not evidence.
+
+Before opening a PR:
+
+```sh
+pnpm lint
+pnpm typecheck          # runs `next typegen` first -- needed on clean checkouts
+pnpm build              # RSC boundaries and standalone output fail differently than dev
+```
+
+For anything touching the container or deploy path, build and run the image rather than reasoning about it:
+
+```sh
+docker build --build-arg GIT_SHA=localtest -t portico:localtest .
+docker run -d --name portico-stg -e APP_ENV=staging -p 3401:3000 portico:localtest
+```
+
+See `docs/DEPLOY.md` for the full local verification recipe, and `docs/SETUP-CHECKLIST.md` for one-time infrastructure setup.
+
+## Things that are load-bearing
+
+- **`app/robots.ts` must keep `export const dynamic = "force-dynamic"`.** Without it the route is prerendered and the build-time `APP_ENV` gets baked in, which would ship a `Disallow: /` robots.txt to production.
+- **Indexability has two gates, and `lib/indexing.ts` owns both.** `APP_ENV=production` *and* `ALLOW_INDEXING=true`. Anything else — staging, a typo, an unset variable — is served `noindex` everywhere. A typo hides a site that should be visible, which is recoverable; the other direction publishes one that should not be, which is not.
+- **Never read `APP_ENV` for indexing decisions directly.** `proxy.ts` and `app/robots.ts` are two expressions of one policy, and when they disagree nothing fails — the header says one thing and `robots.txt` says another, silently. Both call `isPubliclyIndexable()` so drift is impossible rather than unlikely.
+- **`ALLOW_INDEXING` is unset on production on purpose.** The live domain currently serves a placeholder; a placeholder indexed under the real domain is worse than no listing. Set it when the Phase 4 marketing site ships — `dokku config:set portico ALLOW_INDEXING=true` — and the deploy workflow, which reads that same variable off the app, will flip its assertion with it.
+- **Robots headers live in `proxy.ts`, not `next.config.ts` `headers()`.** The latter is compiled into the routes manifest and cannot branch on a runtime env var.
+- **Never bake an environment into the image via `NEXT_PUBLIC_*`.** Those are inlined at build time and CI does not know a commit's destination. Use server-side `APP_URL`.
+- **`proxy.ts` is not an authorization boundary.** Optimistic cookie checks only; real authorization lives in the data access layer and inside each server action.
+- **Playfair Display is never used near a number in a column.** It has no tabular figures, so that is a structural limit rather than a preference. It also has a ~28px floor: below that its hairlines go muddy on the ivory.
+- **The UI sans must have tabular figures.** Plus Jakarta Sans was chosen over Be Vietnam Pro for exactly this: Be Vietnam Pro has none at all (its `1` measures 12.3px against `4` at 22.7px at 32px, and `font-variant-numeric` has no effect), so ledger decimals never aligned. If the face is ever swapped again, measure before committing — do not assume, most faces have the feature but not all.
