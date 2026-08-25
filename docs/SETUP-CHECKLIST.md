@@ -35,9 +35,9 @@ push
 | E · Apps, Postgres, storage, config | ✅ done — both apps, both databases linked, storage mounted, config set |
 | **F · GitHub repo, Actions, protection** | ✅ **done** — GHCR package verified publicly pullable from the VPS |
 | G · Deploy key and secrets | ✅ done — dedicated CI key registered, both secrets set |
-| H · First deploys and TLS | 🟡 **H1 staging live over TLS**; H2 production not deployed |
+| H · First deploys and TLS | ✅ done — **both environments live over TLS**, production held back from indexing |
 | I · Nightly reset | ⬜ blocked on Phase 1 — `scripts/reset-demo.ts` does not exist yet |
-| J · Ongoing | ⬜ after H |
+| J · Ongoing | 🟡 uptime monitoring is yours to set up; the rest is noted |
 | K · Asset sourcing | ⬜ parallel, blocks nothing |
 | L · Staging lockdown | ✅ done — basic auth on, verified 401 anonymous / 200 authenticated |
 
@@ -435,7 +435,7 @@ The workflow SSHes in and runs one Dokku command per environment. Authenticate *
 
 ---
 
-## H. First deploys and verification
+## H. First deploys and verification ✅ done
 
 Do **staging first.** That's the entire point of having it — find the broken SSH key or the wrong GHCR visibility on the environment nobody is looking at.
 
@@ -474,7 +474,7 @@ Do **staging first.** That's the entire point of having it — find the broken S
       The workflow used to report this as `FAIL: staging root is missing a noindex X-Robots-Tag. Check APP_ENV`, which pointed at entirely the wrong thing. Its readiness loop swallowed the connection failure, and every check below reads a header out of a response — where an unreachable host and a misconfigured app both yield an empty string. Fixed: the loop now fails loudly and prints curl's own error.
 - [x] Then **section L**, before leaving staging exposed.
 
-### H2. Production
+### H2. Production ✅ done — live at <https://portico.frontendjuan.com>, indexing held
 
 - [ ] ⚠️ **Release with a merge commit, not a squash.** `main` is an ancestor of `develop`, so a merge keeps it a true superset and every later release stays a clean fast-forward. Squashing would collapse the history into one new SHA and permanently diverge the two branches, so the *next* release PR replays everything and conflicts. Feature PRs stay squash-only; this exception is release PRs only.
 - [ ] Merge `develop` into `main`. Watch `deploy-production`.
@@ -515,17 +515,32 @@ Do **staging first.** That's the entire point of having it — find the broken S
       | `staging` | `true` | `noindex` | `Disallow: /` |
 
       The third row is the one that matters: a wrong-case value **fails closed** rather than publishing. `/app` is `noindex` in every row.
-- [ ] Seed each environment once:
+- [ ] Seed each environment once — **blocked on Phase 1**, `scripts/seed.ts` does not exist yet:
       ```sh
       dokku run portico-staging pnpm tsx scripts/seed.ts
       dokku run portico         pnpm tsx scripts/seed.ts
       ```
-- [ ] Sanity-check memory headroom with **both** apps up: `free -h` and `dokku report portico`.
-- [ ] Re-load each over `https://` and confirm the `http://` redirect works.
+- [x] Memory headroom with **both** apps and **both** databases up: **720 MiB used, 3.0 GiB available**, swap barely touched. Comfortably inside the sizing in section A.
+- [x] Both load over `https://` and `http://` 301s to it. Certificates expire **2026-11-23**, renewal at 59 days, daily cron registered.
+- [x] ⚠️ **Production deployed but did not start: `Processes: 0`, "No web listeners specified for portico".** Its `scale` file was empty where staging's read `web: 1`, so nothing was ever scheduled — while the deploy step still reported success. Fixed with:
+      ```sh
+      dokku ps:scale portico web=1
+      ```
+      **Check `dokku ps:report <app>` for `Running: true` after a first deploy.** `Deployed: true` on its own means the image was accepted, not that anything is serving.
+- [x] ⚠️ **`app.json` was not in the image, and failed silently.** Dokku reads it from `WORKDIR/app.json` *inside the image* — not from the repo, which with `git:from-image` never reaches the server. Nothing imports it, so standalone tracing left it out. The only symptom was one grey line:
+      ```
+      No healthchecks found in app.json for web process type
+      ```
+      Deploys "succeeded" using generic port checks instead of the `/api/health` startup check. Today that is only a downgrade; **from Phase 1 it means `predeploy` never runs, so `prisma migrate deploy` never applies and the app boots against an unmigrated database.** Fixed by copying it in the runner stage. Both environments now log `Running healthcheck name='web check' path='/api/health'`.
+- [x] ⚠️ **`git:from-image` is not idempotent.** Re-deploying an image the app already points at exits 1 with `No changes detected, skipping git commit`. Since every new app's first deploy fails its TLS check and needs a re-run, the deploy step now falls back to `ps:rebuild`.
 
 ---
 
 ## I. Nightly reset
+
+> **Blocked on Phase 1.** `scripts/reset-demo.ts` does not exist yet, and `app.json` currently declares only healthchecks — no `cron` block. `dokku cron:list portico-staging` correctly returns an empty table today.
+>
+> ⚠️ One prerequisite is already handled but easy to undo: **`app.json` only reaches Dokku because the Dockerfile copies it into the image.** The `cron` block will be read from that same file, so if that `COPY` line is ever dropped the nightly reset silently stops being scheduled — exactly as the healthchecks silently were.
 
 - [ ] The schedule lives in `app.json` **in the repo**, so it deploys with the code and applies to *both* apps — nothing to configure by hand. Confirm:
       ```sh
@@ -569,11 +584,18 @@ Do **staging first.** That's the entire point of having it — find the broken S
 
 ## J. Ongoing
 
-- [ ] **Uptime monitoring** — a free UptimeRobot or Better Stack check on the **production** marketing page. This link goes in proposals; you want to know it's down before a prospect tells you. Don't monitor staging; it'll page you for nothing.
+- [ ] **Uptime monitoring — yours to set up.** A free UptimeRobot or Better Stack check on the **production** marketing page. This link goes in proposals; you want to know it's down before a prospect tells you. Don't monitor staging; it'll page you for nothing. Point it at `https://portico.frontendjuan.com/api/health`, which returns the deployed commit's sha — so it catches "serving, but stuck on an old build" as well as "down".
 - [ ] **No database backups.** The data is seeded and truncated nightly by design — backing it up would be theatre. Deliberate, not an oversight.
-- [ ] Verify Let's Encrypt auto-renewal fires at ~60 days for **both** domains: `dokku letsencrypt:list`.
-- [ ] `docker system prune -af` monthly. Two apps plus two Postgres services accumulate old image layers noticeably faster than one — consider a cron.
-- [ ] Watch the first few deploys for OOM in `dmesg`. If swap gets hammered with both apps up, resize one tier.
+- [x] Renewal cron registered (`@daily` in dokku's crontab, added once globally). Both certs expire **2026-11-23** with renewal due at 59 days.
+- [ ] Still worth checking it actually fires at ~60 days: `dokku letsencrypt:list`. A renewal cron that silently does nothing looks identical to one that works, right up until the cert expires.
+- [ ] Prune old image layers monthly. Currently **11 GB used of 38 GB**, with ~3.3 GB reclaimable after only a handful of deploys, so this does need doing — two apps plus two Postgres services accumulate layers noticeably faster than one.
+
+      > ⚠️ **Do not cron `docker system prune -af`.** The `-a` flag removes every image not used by a *running* container, which here includes `dokku/wait`, `dokku/ambassador`, `dokku/s3backup` and the herokuish images — Dokku's own tooling. They get re-pulled, but a prune landing mid-deploy can break that deploy. Prefer the conservative form, which only removes genuinely dangling layers:
+      > ```sh
+      > docker image prune -f && docker builder prune -f --keep-storage 2GB
+      > ```
+      > Run the aggressive `-af` version by hand when the disk actually needs it, not on a schedule.
+- [x] Checked `dmesg` for OOM after the first deploys of both environments: **none**. With both apps and both databases up, 720 MiB used and 3.0 GiB available, swap essentially untouched at 1 MiB. Keep an eye on it as real routes land.
 - [ ] Periodically re-check that staging is still 401ing and still `noindex` — it's the kind of thing that silently regresses after a config change.
 
 ---
