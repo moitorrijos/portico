@@ -33,7 +33,7 @@ push
 | C · Dokku install | ✅ v0.38.27 + Docker + nginx, via the official bootstrap |
 | D · DNS | ✅ both records live on `frontendjuan.com`, reaching nginx |
 | E · Apps, Postgres, storage, config | ✅ done — both apps, both databases linked, storage mounted, config set |
-| **F · GitHub repo, Actions, protection** | ✅ **done** except making the GHCR package public |
+| **F · GitHub repo, Actions, protection** | ✅ **done** — GHCR package verified publicly pullable from the VPS |
 | G · Deploy key and secrets | ⬜ not started — `DOKKU_HOST` and `DOKKU_SSH_PRIVATE_KEY` confirmed empty in CI |
 | H · First deploys and TLS | ⬜ blocked on A–E and G |
 | I · Nightly reset | ⬜ blocked on Phase 1 code |
@@ -335,7 +335,7 @@ Memory with both databases up: **636 MiB used, 3.1 GiB available, swap at 1 MiB.
 
 ---
 
-## F. GitHub repo and container registry ✅ mostly done
+## F. GitHub repo and container registry ✅ done
 
 **Repo is live at <https://github.com/moitorrijos/portico>** — public, default branch `develop`.
 
@@ -356,13 +356,32 @@ Memory with both databases up: **636 MiB used, 3.1 GiB available, swap at 1 MiB.
 - [x] Merge settings: squash-only (merge commits disabled), rebase allowed, **merged branches auto-delete**.
 - [x] Branch and commit conventions documented in `AGENTS.md`, below the `BEGIN/END:nextjs-agent-rules` markers that `next dev` rewrites.
 
-### Still to do in this section
+### Optional and deferred — nothing here blocks a deploy
 
-- [ ] ⚠️ **Make the GHCR package public** — Settings → Packages → `portico` → Change visibility → Public.
+- [x] **GHCR package is already public — nothing to do.** This was previously listed here as a blocker, on the assumption that GHCR packages are private by default. That is true of packages pushed by hand, but **not** of one pushed by Actions from a public repo: GitHub links the package to the repository and it inherits the repo's visibility.
 
-      **This blocks the VPS from pulling.** GHCR packages are private by default even in a public repo, so `git:from-image` will fail with an auth error until this is flipped. I can't verify or change it from here — the token lacks `read:packages`.
+      **Corrected location, for whenever it does need changing.** Package visibility is a property of the *package*, at account scope — it is **not** in repository Settings, which is where this checklist used to point:
 
-      If you'd rather keep it private, run this on the VPS instead:
+      ```
+      https://github.com/users/moitorrijos/packages/container/portico/settings
+      ```
+      (profile → **Packages** tab → `portico` → **Package settings** → Danger Zone → Change visibility)
+
+      **Verify it rather than reading the UI**, since a wrong answer here costs a failed deploy. Fetch an anonymous pull token and list the tags — no credentials anywhere in this:
+      ```sh
+      TOK=$(curl -s "https://ghcr.io/token?scope=repository:moitorrijos/portico:pull&service=ghcr.io" \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])')
+      curl -s -H "Authorization: Bearer $TOK" https://ghcr.io/v2/moitorrijos/portico/tags/list
+      ```
+      A tag list means public. A **403** means private — and a nonexistent package returns 403 too, so check the name is right before concluding anything.
+
+      Confirmed from the VPS itself, which is the machine that actually matters, with **no `registry:login` configured**:
+      ```sh
+      docker manifest inspect ghcr.io/moitorrijos/portico:<sha>   # -> OCI index, linux/amd64
+      ```
+      `linux/amd64` also confirms the image platform matches the `x86_64` box, per section A.
+
+      If you ever make it private, the VPS then needs:
       ```sh
       dokku registry:login --global ghcr.io moitorrijos <PAT-with-read:packages>
       ```
