@@ -120,10 +120,26 @@ jobs:
           }
           [ -n "${STAGING_BASIC_AUTH:-}" ] && echo "Using basic auth for staging checks."
 
-          # Give the container a moment to finish the swap.
+          # Give the container a moment to finish the swap. This loop MUST fail
+          # loudly when it never succeeds: every check below reads a header out
+          # of a response, and an unreachable host produces the same empty
+          # string as a misconfigured app. Without this the job blamed APP_ENV
+          # for what was actually a TLS handshake failure -- which is exactly
+          # how the very first deploy fails, because letsencrypt can only be
+          # enabled once a container is already running (checklist section H).
+          READY=false
           for i in $(seq 1 30); do
-            fetch -sfo /dev/null "$URL/api/health" && break || sleep 2
+            if fetch -sfo /dev/null "$URL/api/health"; then READY=true; break; fi
+            sleep 2
           done
+          if [ "$READY" != true ]; then
+            echo "FAIL: $URL/api/health never answered after 60s." >&2
+            echo "--- curl's own error ---" >&2
+            fetch -sS -o /dev/null "$URL/api/health" >&2 || true
+            echo "A TLS error here means letsencrypt is not enabled for this app yet." >&2
+            echo "A 401 means STAGING_BASIC_AUTH is missing or wrong." >&2
+            exit 1
+          fi
 
           echo "--- X-Robots-Tag on / ---"
           HEADER=$(fetch -sSI "$URL/" | tr -d '\r' | grep -i '^x-robots-tag:' || true)
@@ -168,9 +184,24 @@ jobs:
         run: |
           set -euo pipefail
           URL=https://portico.frontendjuan.com
+
+          # This must fail loudly rather than fall through. The "/ must NOT be
+          # noindex" check below reads success from an EMPTY header -- and an
+          # unreachable host also produces an empty header. Without this gate a
+          # production site that is completely down reports a green deploy on
+          # the one check whose whole job is catching silent deindexing.
+          READY=false
           for i in $(seq 1 30); do
-            curl -sfo /dev/null "$URL/api/health" && break || sleep 2
+            if curl -sfo /dev/null "$URL/api/health"; then READY=true; break; fi
+            sleep 2
           done
+          if [ "$READY" != true ]; then
+            echo "FAIL: $URL/api/health never answered after 60s." >&2
+            echo "--- curl's own error ---" >&2
+            curl -sS -o /dev/null "$URL/api/health" >&2 || true
+            echo "A TLS error here means letsencrypt is not enabled for this app yet." >&2
+            exit 1
+          fi
 
           # Marketing must be indexable -- a stray noindex here would quietly
           # deindex the site, which is the failure nobody notices for weeks.
@@ -181,6 +212,7 @@ jobs:
             *noindex*) echo "FAIL: production marketing page is noindex." \
                             "APP_ENV is probably not set to 'production'." >&2
                        exit 1 ;;
+            *) echo "OK: / carries no noindex" ;;
           esac
 
           # The authenticated trees must NOT be indexable.
