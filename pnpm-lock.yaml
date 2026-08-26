@@ -14,6 +14,9 @@ importers:
       '@prisma/client':
         specifier: ^7.10.0
         version: 7.10.0(prisma@7.10.0(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(magicast@0.5.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@5.9.3))(typescript@5.9.3)
+      jose:
+        specifier: ^6.2.10
+        version: 6.2.10
       next:
         specifier: 16.3.2
         version: 16.3.2(@babel/core@7.29.7)(@types/node@20.19.43)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -1985,6 +1988,9 @@ packages:
   jiti@2.7.0:
     resolution: {integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==}
     hasBin: true
+
+  jose@6.2.10:
+    resolution: {integrity: sha512-iiW7J9qRFlGxvCOIBDBDxFePQSn7ZMAnrYGhrrOo6siO/MIqwfyilLR27pkfDgUk+raLuzADS8A3S/KLBisc0g==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -4801,6 +4807,8 @@ snapshots:
       set-function-name: 2.0.2
 
   jiti@2.7.0: {}
+
+  jose@6.2.10: {}
 
   js-tokens@4.0.0: {}
 
