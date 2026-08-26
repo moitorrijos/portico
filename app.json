@@ -1,4 +1,9 @@
 {
+  "scripts": {
+    "dokku": {
+      "predeploy": "node prisma-cli/node_modules/prisma/build/index.js migrate deploy"
+    }
+  },
   "healthchecks": {
     "web": [
       {
