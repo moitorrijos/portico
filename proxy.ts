@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { isPubliclyIndexable } from "@/lib/indexing";
+import { SESSION_COOKIE_NAME } from "@/lib/session-cookie";
 
 /**
  * Per-request edge/node hook (Next 16 renamed `middleware.ts` to `proxy.ts`).
@@ -9,7 +10,16 @@ import { isPubliclyIndexable } from "@/lib/indexing";
  * boundary -- it does optimistic checks only. Real authorization lives in the
  * data access layer (lib/dal.ts) and inside each server action.
  *
- * Today it does one job: robots headers.
+ * Today it does two jobs: robots headers, and an OPTIMISTIC redirect of
+ * anonymous traffic away from the private trees.
+ *
+ * "Optimistic" is load-bearing. It checks that a session cookie EXISTS. It does
+ * not verify the signature, does not decode it, and never touches the database
+ * -- a forged cookie containing the word "x" gets past this. That is fine and
+ * intended: this is a redirect for humans who are not signed in, not a security
+ * boundary. Real authorization is lib/dal.ts, which re-reads the user from the
+ * database on every request. Verifying here as well would mean a database round
+ * trip in front of every asset request for no additional safety.
  *
  * Why here and not `next.config.ts` headers()? Because `headers()` is compiled
  * into the build's routes manifest, so it cannot branch on a *runtime*
@@ -39,6 +49,15 @@ export function proxy(request: NextRequest) {
 
   if (!indexable || isPrivate) {
     response.headers.set("X-Robots-Tag", NOINDEX);
+  }
+
+  // Cookie PRESENCE only -- see the note at the top of this file.
+  if (isPrivate && !request.cookies.has(SESSION_COOKIE_NAME)) {
+    const home = new URL("/", request.url);
+    // Preserve where they were going, so a link shared in a proposal lands on
+    // the right screen after the visitor picks a persona.
+    home.searchParams.set("from", pathname);
+    return NextResponse.redirect(home);
   }
 
   return response;
