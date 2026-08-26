@@ -37,7 +37,7 @@ push
 | G · Deploy key and secrets | ✅ done — dedicated CI key registered, both secrets set |
 | H · First deploys and TLS | ✅ done — **both environments live over TLS**, production held back from indexing |
 | I · Nightly reset | ⬜ blocked on Phase 1 — `scripts/reset-demo.ts` does not exist yet |
-| J · Ongoing | 🟡 uptime monitoring is yours to set up; the rest is noted |
+| J · Ongoing | 🟡 monitoring live; periodic checks remain by nature |
 | K · Asset sourcing | ⬜ parallel, blocks nothing |
 | L · Staging lockdown | ✅ done — basic auth on, verified 401 anonymous / 200 authenticated |
 
@@ -626,7 +626,33 @@ Do **staging first.** That's the entire point of having it — find the broken S
 
 ## J. Ongoing
 
-- [ ] **Uptime monitoring — yours to set up.** A free UptimeRobot or Better Stack check on the **production** marketing page. This link goes in proposals; you want to know it's down before a prospect tells you. Don't monitor staging; it'll page you for nothing. Point it at `https://portico.frontendjuan.com/api/health`, which returns the deployed commit's sha — so it catches "serving, but stuck on an old build" as well as "down".
+- [x] **Uptime monitoring live — Better Stack, on production only**, checking `https://portico.frontendjuan.com/api/health`.
+
+      **The monitor has to live off the box.** If the VPS dies, anything hosted on it dies with it — which is why this is the one piece of the stack that cannot be self-hosted here, and why it needs an external account.
+
+      | Setting | Value | Why |
+      |---|---|---|
+      | URL | `…/api/health` | not `/` — see below |
+      | Expect | HTTP 200 | |
+      | Body check | `"status":"ok"` | 200 alone is not enough |
+      | Interval | 3–5 min | |
+      | Timeout | 20–30s | Helsinki + 2 *shared* vCPUs |
+      | Confirm before alerting | 2 consecutive failures | |
+      | SSL expiry alert | **on**, ≥14 days notice | the highest-value setting here |
+
+      **Why `/api/health` and not `/`.** `/` is prerendered static, so a wedged-but-running container can still serve it while nothing dynamic responds. `/api/health` is `force-dynamic`, so it always executes the app — and it returns the deployed commit's sha, which distinguishes "serving the current build" from merely "serving".
+
+      **The SSL expiry alert is the part that earns its keep.** Renewal runs from a cron at 59 days, and a renewal cron that silently does nothing looks exactly like one that works — right up until the certificate expires and the site goes dark. This is the only check that catches that with time to act.
+
+      **Don't monitor staging.** It returns 401 by design and would page continuously. If you ever want it, configure the monitor to *expect* 401 rather than giving it the credentials — that still proves nginx and the container are alive without putting a password in a third-party service.
+
+- [x] **Verify a monitor is real by looking at the box, not the dashboard.** A dashboard says a monitor exists; the access log says it is arriving, at the right path, from where:
+      ```sh
+      tail -400 /var/log/nginx/portico-access.log | grep -i "better\|uptime"
+      ```
+      Confirmed probing `/api/health` → `200` from **four** distinct regions, which is what makes a single slow response from one location not page you.
+
+      > Probes log **82** bytes where `curl` logs 64. Not an anomaly: monitors send `Accept-Encoding: gzip`, and gzip's header and trailer cost more than they save on a payload this small, so the compressed response is *larger*. Worth knowing so it is not mistaken later for two different responses being served.
 - [ ] **No database backups.** The data is seeded and truncated nightly by design — backing it up would be theatre. Deliberate, not an oversight.
 - [x] Renewal cron registered (`@daily` in dokku's crontab, added once globally). Both certs expire **2026-11-23** with renewal due at 59 days.
 - [ ] Still worth checking it actually fires at ~60 days: `dokku letsencrypt:list`. A renewal cron that silently does nothing looks identical to one that works, right up until the cert expires.
