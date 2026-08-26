@@ -1,0 +1,341 @@
+// Pórtico data model — spec §4, transcribed as-is.
+//
+// Thirteen models, and the spec is emphatic that it stays that way: every table
+// here earns a screen. Anything that does not is scope creep wearing a schema.
+//
+// Money is `Int` cents everywhere. Never Float — 0.1 + 0.2 is a rounding bug
+// waiting to be found in a ledger, and a rent roll that does not add up is the
+// most obvious possible way for this piece to look amateur.
+
+generator client {
+  // Prisma 7 renamed this from `prisma-client-js`, and `output` is now
+  // REQUIRED rather than defaulting into node_modules. Output lands inside the
+  // repo on purpose: Next's standalone tracing only copies what it can see
+  // being imported, and a client generated into node_modules/.prisma is
+  // invisible to it. Generated, not committed — the Docker builder stage runs
+  // `prisma generate` before `next build`.
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  // Prisma 7 moved the connection URL out of the schema and into
+  // prisma7.config.ts. Leaving `url` here is a v6 habit that now fails to
+  // parse.
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// People
+// ---------------------------------------------------------------------------
+
+enum Role {
+  OWNER
+  STAFF
+  RESIDENT
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  phone     String?
+  role      Role
+  createdAt DateTime @default(now())
+
+  leases         Lease[]
+  requests       Request[]       @relation("RequestedBy")
+  assignedTo     Request[]       @relation("AssignedTo")
+  notes          RequestNote[]
+
+  @@index([role])
+}
+
+// ---------------------------------------------------------------------------
+// Property
+// ---------------------------------------------------------------------------
+
+model Community {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  city        String
+  state        String
+  description String
+  heroImage   String
+  // Postgres has real array columns, so the amenity list does not need a join
+  // table it would never be queried through.
+  amenities   String[]
+
+  units         Unit[]
+  announcements Announcement[]
+}
+
+enum UnitStatus {
+  OCCUPIED
+  VACANT
+  MAINTENANCE
+  RESERVED
+}
+
+model Unit {
+  id          String     @id @default(cuid())
+  communityId String
+  label       String
+  bedrooms    Int
+  baths       Float
+  sqft        Int
+  monthlyRent Int
+  status      UnitStatus
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  leases    Lease[]
+  requests  Request[]
+
+  // Unit labels are only unique within their community — "2B" exists in all
+  // three. Without this, the seed happily creates duplicates and the units
+  // table shows two rows that look identical.
+  @@unique([communityId, label])
+  @@index([status])
+}
+
+enum LeaseStatus {
+  ACTIVE
+  ENDED
+  UPCOMING
+}
+
+model Lease {
+  id          String      @id @default(cuid())
+  unitId      String
+  residentId  String
+  startDate   DateTime
+  endDate     DateTime
+  monthlyRent Int
+  status      LeaseStatus
+
+  unit     Unit      @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  resident User      @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  payments Payment[]
+
+  // The lease IS the authorization boundary for the whole resident surface
+  // (spec §5): every resident-facing query is scoped by the caller's active
+  // lease. This index is what makes that lookup cheap enough to do on every
+  // request rather than being tempted to cache it somewhere leaky.
+  @@index([residentId, status])
+  @@index([unitId])
+}
+
+enum PaymentStatus {
+  PAID
+  DUE
+  LATE
+}
+
+model Payment {
+  id          String        @id @default(cuid())
+  leaseId     String
+  amountCents Int
+  dueDate     DateTime
+  paidAt      DateTime?
+  method      String
+  status      PaymentStatus
+
+  lease Lease @relation(fields: [leaseId], references: [id], onDelete: Cascade)
+
+  @@index([leaseId, dueDate])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Maintenance
+// ---------------------------------------------------------------------------
+
+enum Priority {
+  LOW
+  NORMAL
+  URGENT
+}
+
+enum RequestStatus {
+  NEW
+  SCHEDULED
+  IN_PROGRESS
+  RESOLVED
+}
+
+model Request {
+  id           String        @id @default(cuid())
+  unitId       String
+  residentId   String
+  category     String
+  title        String
+  description  String
+  priority     Priority
+  status       RequestStatus
+  assigneeId   String?
+  scheduledFor DateTime?
+  createdAt    DateTime      @default(now())
+  resolvedAt   DateTime?
+
+  unit     Unit          @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  resident User          @relation("RequestedBy", fields: [residentId], references: [id], onDelete: Cascade)
+  assignee User?         @relation("AssignedTo", fields: [assigneeId], references: [id], onDelete: SetNull)
+  notes    RequestNote[]
+
+  @@index([status, priority])
+  @@index([residentId])
+  @@index([unitId])
+}
+
+model RequestNote {
+  id        String   @id @default(cuid())
+  requestId String
+  authorId  String
+  body      String
+  // THE most important field in this schema, per spec §4.
+  //
+  // A manager writing "tenant has complained three times, check the warranty"
+  // must never reach the resident's screen. It is excluded in the QUERY, never
+  // in the render — see lib/dal/requests.ts. Filtering in a component means the
+  // text still travels to the browser and sits in the page source, which is
+  // not privacy, it is a CSS-level illusion.
+  internal  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  request Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  author  User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  // Composite so the resident-facing read (`requestId` + `internal: false`) is
+  // served straight from the index rather than fetching internal rows and
+  // discarding them.
+  @@index([requestId, internal])
+}
+
+// ---------------------------------------------------------------------------
+// Documents and announcements
+// ---------------------------------------------------------------------------
+
+enum DocumentScope {
+  COMMUNITY
+  UNIT
+  RESIDENT
+}
+
+enum DocumentKind {
+  LEASE
+  NOTICE
+  RECEIPT
+  POLICY
+}
+
+model Document {
+  id         String        @id @default(cuid())
+  scope      DocumentScope
+  // Deliberately NOT a foreign key: refId points at a Community, Unit or User
+  // depending on `scope`. That is a polymorphic reference, and the cost is
+  // real — the database cannot enforce it, so the DAL must. Every read goes
+  // through a function that pairs scope and refId together; never query on
+  // refId alone, or a resident id will match a unit id's documents.
+  refId      String
+  title      String
+  kind       DocumentKind
+  fileUrl    String
+  uploadedAt DateTime      @default(now())
+
+  @@index([scope, refId])
+}
+
+enum Audience {
+  ALL
+  COMMUNITY
+  UNIT
+}
+
+model Announcement {
+  id          String    @id @default(cuid())
+  communityId String?
+  title       String
+  body        String
+  audience    Audience
+  publishedAt DateTime  @default(now())
+
+  community Community? @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  @@index([communityId, publishedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Marketing — the configurator (spec §6) and what it produces
+// ---------------------------------------------------------------------------
+
+model HomeModel {
+  id             String   @id @default(cuid())
+  slug           String   @unique
+  name           String
+  basePriceCents Int
+  bedrooms       Int
+  baths          Float
+  sqft           Int
+  images         String[]
+
+  options   ModelOption[]
+  inquiries Inquiry[]
+}
+
+model ModelOption {
+  id              String  @id @default(cuid())
+  homeModelId     String
+  // e.g. "Finish package" / "Appliance tier". Grouped rather than flat because
+  // the configurator picks exactly one option per group.
+  group           String
+  label           String
+  priceDeltaCents Int
+  isDefault       Boolean @default(false)
+
+  homeModel HomeModel @relation(fields: [homeModelId], references: [id], onDelete: Cascade)
+
+  @@index([homeModelId, group])
+}
+
+enum InquiryStatus {
+  NEW
+  CONTACTED
+  CLOSED
+}
+
+model Inquiry {
+  id          String        @id @default(cuid())
+  name        String
+  email       String
+  phone       String?
+  homeModelId String?
+  communityId String?
+  // The configurator's chosen options, captured as submitted. Stored as JSON
+  // rather than as rows because it is a point-in-time record of what someone
+  // asked for -- if an option's price changes next week, the quote they were
+  // shown must not change with it.
+  configJson  Json?
+  message     String
+  createdAt   DateTime      @default(now())
+  status      InquiryStatus @default(NEW)
+
+  homeModel HomeModel? @relation(fields: [homeModelId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Fake outbox — spec §9
+// ---------------------------------------------------------------------------
+
+model EmailLog {
+  id        String   @id @default(cuid())
+  to        String
+  subject   String
+  body      String
+  template  String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}

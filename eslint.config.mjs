@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Prisma's generated client is machine-written TypeScript, several
+    // thousand lines of it. Linting it reports style opinions about code
+    // nobody edits, and it is regenerated on every build anyway.
+    "lib/generated/**",
   ]),
 ]);
 
