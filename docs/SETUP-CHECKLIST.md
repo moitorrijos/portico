@@ -557,11 +557,12 @@ Do **staging first.** That's the entire point of having it — find the broken S
       | `staging` | `true` | `noindex` | `Disallow: /` |
 
       The third row is the one that matters: a wrong-case value **fails closed** rather than publishing. `/app` is `noindex` in every row.
-- [ ] Seed each environment once — **blocked on Phase 1**, `scripts/seed.ts` does not exist yet:
+- [ ] Seed each environment once. The seed ships as a **pre-bundled single file**, not as TypeScript plus a `tsx` runtime — the standalone output contains no `@prisma` packages for a source script to import, so `pnpm tsx scripts/seed.ts` would fail inside the container:
       ```sh
-      dokku run portico-staging pnpm tsx scripts/seed.ts
-      dokku run portico         pnpm tsx scripts/seed.ts
+      dokku run portico-staging node dist-scripts/seed.mjs
+      dokku run portico         node dist-scripts/seed.mjs
       ```
+      It truncates before it writes and is deterministic (fixed PRNG seed), so re-running it is safe and always produces the same data.
 - [x] Memory headroom with **both** apps and **both** databases up: **720 MiB used, 3.0 GiB available**, swap barely touched. Comfortably inside the sizing in section A.
 - [x] Both load over `https://` and `http://` 301s to it. Certificates expire **2026-11-23**, renewal at 59 days, daily cron registered.
 - [x] ⚠️ **Production deployed but did not start: `Processes: 0`, "No web listeners specified for portico".** Its `scale` file was empty where staging's read `web: 1`, so nothing was ever scheduled — while the deploy step still reported success. Fixed with:
