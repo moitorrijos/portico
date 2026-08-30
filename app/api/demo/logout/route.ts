@@ -1,5 +1,4 @@
-import { NextResponse, type NextRequest } from "next/server";
-
+import { seeOther } from "@/lib/http";
 import { deleteSession } from "@/lib/session";
 
 /**
@@ -9,7 +8,8 @@ import { deleteSession } from "@/lib/session";
  * anything can follow, and "why did I get signed out?" is a confusing thing to
  * debug when the answer is a prefetcher.
  */
-export async function POST(request: NextRequest) {
+export async function POST() {
   await deleteSession();
-  return NextResponse.redirect(new URL("/", request.url), 303);
+  // Relative Location -- see lib/http.ts for why request.url cannot be used.
+  return seeOther("/");
 }
