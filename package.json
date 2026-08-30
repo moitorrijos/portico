@@ -14,7 +14,8 @@
     "db:studio": "prisma studio",
     "db:reset": "prisma migrate reset",
     "db:seed": "tsx scripts/seed.ts",
-    "build:scripts": "esbuild scripts/seed.ts --bundle --platform=node --format=esm --target=node24 --tsconfig=tsconfig.json --external:pg-native --banner:js=\"import{createRequire as __cr}from'node:module';const require=__cr(import.meta.url);\" --outfile=dist-scripts/seed.mjs --log-level=warning"
+    "build:scripts": "esbuild scripts/seed.ts --bundle --platform=node --format=esm --target=node24 --tsconfig=tsconfig.json --external:pg-native --banner:js=\"import{createRequire as __cr}from'node:module';const require=__cr(import.meta.url);\" --outfile=dist-scripts/seed.mjs --log-level=warning",
+    "test": "vitest run"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",
@@ -36,7 +37,8 @@
     "eslint-config-next": "16.3.2",
     "tailwindcss": "^4",
     "tsx": "^4.23.12",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.11"
   },
   "packageManager": "pnpm@10.29.3"
 }
