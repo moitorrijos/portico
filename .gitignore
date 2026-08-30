@@ -51,3 +51,4 @@ next-env.d.ts
 # editor / local tooling
 .vscode/
 .idea/
+/dist-scripts

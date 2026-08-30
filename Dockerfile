@@ -130,12 +130,24 @@ COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
 # even when DATABASE_URL is set and --schema is passed. See prisma7.config.ts.
 COPY --from=builder /app/prisma7.config.ts ./prisma7.config.ts
 
-# STILL TO COME (seed PR): scripts/ and lib/demo-data/ plus a `tsx` runtime, for
-# `dokku run <app> ... scripts/seed.ts` and the app.json cron that runs
-# scripts/reset-demo.ts. Nothing imports those either, so they need explicit
-# COPY lines exactly like the ones above -- and the same verification: run the
-# built image and execute the command, rather than reading the COPY lines and
-# believing them.
+# The seed, as a single pre-bundled file:
+#
+#   dokku run <app> node dist-scripts/seed.mjs
+#
+# It is bundled at build time (see `build:scripts`) rather than shipped as
+# TypeScript source plus a `tsx` runtime, because the standalone output contains
+# NO @prisma packages at all -- Next compiles the client into its own server
+# bundle, so there is nothing for a separate script to import. Shipping source
+# would mean a second dependency tree just to run one file, on top of the one
+# already carried for the Prisma CLI.
+#
+# esbuild specifics that are not optional:
+#   - format=esm, not cjs. CJS output dies on `import.meta.url` being undefined.
+#   - the createRequire banner. `pg` is CommonJS and dynamically requires node
+#     builtins, which an ESM bundle rejects with "Dynamic require of \"events\"
+#     is not supported".
+#   - pg-native external: an optional native dependency that is not installed.
+COPY --from=builder --chown=nextjs:nodejs /app/dist-scripts ./dist-scripts
 
 USER nextjs
 EXPOSE 3000

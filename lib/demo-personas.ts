@@ -1,4 +1,10 @@
-import "server-only";
+/**
+ * Deliberately NOT `server-only`. This module holds no secrets — three labels,
+ * three landing paths, three seeded email addresses that exist only to be
+ * looked up. It is imported by the seed script, which runs outside Next
+ * entirely, and by the marketing page that renders the buttons. Marking it
+ * server-only breaks the first and buys nothing on the second.
+ */
 
 /**
  * The three demo identities, per spec §9.
