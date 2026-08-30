@@ -1,7 +1,8 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { DEMO_PERSONAS, isDemoPersona } from "@/lib/demo-personas";
+import { seeOther } from "@/lib/http";
 import { createSession } from "@/lib/session";
 
 /**
@@ -28,7 +29,7 @@ import { createSession } from "@/lib/session";
  * everything else 404s without touching the database.
  */
 export async function POST(
-  request: NextRequest,
+  _request: Request,
   { params }: { params: Promise<{ persona: string }> },
 ) {
   const { persona } = await params;
@@ -58,8 +59,8 @@ export async function POST(
 
   await createSession({ userId: user.id, role: user.role });
 
-  // 303, not 302. After a POST, 303 tells the browser to follow with GET;
-  // 302's behaviour here is historically ambiguous and some clients re-POST to
-  // the target.
-  return NextResponse.redirect(new URL(landing, request.url), 303);
+  // Relative Location, via seeOther -- NOT `new URL(landing, request.url)`.
+  // In the container `request.url` is built from the 0.0.0.0 bind address, so
+  // that idiom redirects a prospect to https://0.0.0.0:3000/app. See lib/http.ts.
+  return seeOther(landing);
 }
