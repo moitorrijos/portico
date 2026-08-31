@@ -204,6 +204,19 @@ export const RESIDENT_NAMES = [
   "Cormac Sheehan", "Delphine Aubry",
 ] as const;
 
+/**
+ * People who used to live here.
+ *
+ * Kept separate from RESIDENT_NAMES so a former tenant never also appears as a
+ * current one -- the same person listed as both the occupant of 2C and the
+ * previous occupant of 4B is the sort of detail that makes seeded data read as
+ * generated.
+ */
+export const FORMER_RESIDENT_NAMES = [
+  "Anneke Vos", "Desmond Achebe", "Freya Lindholm",
+  "Ibrahim Toure", "Marta Kowalczyk", "Rufus Beaumont",
+] as const;
+
 export const REQUEST_CATEGORIES = [
   "Plumbing", "Electrical", "Heating & cooling", "Appliance",
   "Doors & locks", "Pest control", "Common area", "Water damage",

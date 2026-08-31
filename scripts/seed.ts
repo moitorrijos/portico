@@ -24,6 +24,7 @@ import {
   OPTION_GROUPS,
   PAYMENT_METHODS,
   REQUEST_CATEGORIES,
+  FORMER_RESIDENT_NAMES,
   RESIDENT_NAMES,
   STAFF,
 } from "@/lib/demo-data/catalogue";
@@ -287,7 +288,62 @@ async function main() {
     await db.unit.update({ where: { id: vacant[2].id }, data: { status: "RESERVED" } });
   }
 
-  console.log(`  ${leases.length} active leases, ${allUnits.length - leases.length} not occupied`);
+  /*
+   * Give most empty units a previous tenancy.
+   *
+   * Without this every non-occupied unit has no history at all, so the unit
+   * detail screen's vacant view answers all three of its questions with
+   * "never" -- vacant since never, last resident nobody, nothing outstanding.
+   * Three empty states side by side reads as missing data rather than as an
+   * available apartment, and "how long has this been empty" is the first thing
+   * a manager asks about one.
+   *
+   * A couple are left with no history on purpose: a newly built unit that has
+   * genuinely never been let is a real case, and the screen should handle it.
+   */
+  const emptyUnits = allUnits.filter((u) => !taken.has(u.id));
+  const formerResidents = await Promise.all(
+    FORMER_RESIDENT_NAMES.map((name, i) => {
+      const handle = name.toLowerCase().replace(/[^a-z]+/g, ".");
+      return db.user.create({
+        data: {
+          email: `${handle}.former${i}@example.com`,
+          name,
+          phone: `(${rng.pick(["401", "508", "203"])}) 555-0${rng.int(200, 899)}`,
+          role: "RESIDENT",
+        },
+      });
+    }),
+  );
+
+  let endedLeaseCount = 0;
+  for (const [index, unit] of emptyUnits.entries()) {
+    const previous = formerResidents[index % formerResidents.length];
+    // Leave the last two with no history -- see the note above.
+    if (!previous || index >= emptyUnits.length - 2) continue;
+
+    // Ended between one and four months ago. Much longer and the unit reads as
+    // unlettable rather than as between tenancies -- an eight-month void on a
+    // three-bed at $2,740 says something is wrong with the apartment, which is
+    // not the story a portfolio at 76% occupancy is telling.
+    const endedMonthsAgo = rng.int(1, 4);
+    await db.lease.create({
+      data: {
+        unitId: unit.id,
+        residentId: previous.id,
+        startDate: monthsAgo(endedMonthsAgo + rng.int(12, 24)),
+        endDate: monthsAgo(endedMonthsAgo),
+        monthlyRent: unit.monthlyRent,
+        status: "ENDED",
+      },
+    });
+    endedLeaseCount += 1;
+  }
+
+  console.log(
+    `  ${leases.length} active leases, ${allUnits.length - leases.length} not occupied ` +
+      `(${endedLeaseCount} with a previous tenancy)`,
+  );
 
   // --- payments ------------------------------------------------------------
   // 18 months of history with a realistic scatter. Most people pay on time;

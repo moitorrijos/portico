@@ -153,3 +153,73 @@ export type LatePaymentDTO = {
    *  between the server render and a client re-render at a clock boundary. */
   daysLate: number;
 };
+
+/** A row in the units table. */
+export type UnitRowDTO = {
+  id: string;
+  label: string;
+  communityId: string;
+  communityName: string;
+  bedrooms: number;
+  baths: number;
+  sqft: number;
+  monthlyRentCents: number;
+  status: "OCCUPIED" | "VACANT" | "MAINTENANCE" | "RESERVED";
+  /** Null for every status except OCCUPIED — the vacant composition depends
+   *  on this being absent rather than on the status string. */
+  residentId: string | null;
+  residentName: string | null;
+};
+
+export type UnitPaymentDTO = {
+  id: string;
+  amountCents: number;
+  dueDate: Date;
+  paidAt: Date | null;
+  status: "PAID" | "DUE" | "LATE";
+  method: string;
+};
+
+export type UnitDetailDTO = {
+  id: string;
+  label: string;
+  bedrooms: number;
+  baths: number;
+  sqft: number;
+  monthlyRentCents: number;
+  status: "OCCUPIED" | "VACANT" | "MAINTENANCE" | "RESERVED";
+  community: { id: string; name: string; city: string; state: string };
+  activeLease: {
+    id: string;
+    startDate: Date;
+    endDate: Date;
+    monthlyRentCents: number;
+    resident: { id: string; name: string; email: string; phone: string | null };
+    payments: UnitPaymentDTO[];
+  } | null;
+  pastLeases: {
+    id: string;
+    status: "ACTIVE" | "ENDED" | "UPCOMING";
+    startDate: Date;
+    endDate: Date;
+    residentName: string;
+  }[];
+  /** When the last lease ended, or null if the unit has never been let. */
+  vacantSince: Date | null;
+  /**
+   * Whole days empty, computed server-side.
+   *
+   * Deliberately not derived in the component from `Date.now()`: that is
+   * impure in a render, differs between the server pass and any client
+   * re-render, and flips at midnight. React's compiler rejects it outright.
+   */
+  daysVacant: number | null;
+  requests: {
+    id: string;
+    title: string;
+    category: string;
+    priority: "LOW" | "NORMAL" | "URGENT";
+    status: "NEW" | "SCHEDULED" | "IN_PROGRESS" | "RESOLVED";
+    createdAt: Date;
+  }[];
+};

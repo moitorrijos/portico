@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { DemoEntry } from "@/components/app/demo-entry";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 /* Placeholder. The real marketing home is Phase 4 -- this exists so the route
@@ -8,7 +9,7 @@ export default function Home() {
   const isProduction = process.env.APP_ENV === "production";
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center px-base py-loose">
+    <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center px-base py-loose">
       <p className="eyebrow mb-base">Demo · Pórtico</p>
 
       <h1 className="font-display text-display-lg leading-[1.05] text-ink">
@@ -20,6 +21,10 @@ export default function Home() {
         a resident portal. One codebase, two apps, and data each side can only
         see its own half of.
       </p>
+
+      <div className="mt-loose">
+        <DemoEntry />
+      </div>
 
       <p className="mt-loose max-w-prose text-ink-muted">
         Pórtico is a fictional company built as a portfolio piece. Nothing here

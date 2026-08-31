@@ -188,6 +188,7 @@ export function SortableTh({
   numeric,
   direction,
   onSort,
+  href,
   children,
   className,
 }: {
@@ -195,11 +196,52 @@ export function SortableTh({
   /** `undefined` means this column is not the active sort. */
   direction?: "asc" | "desc";
   onSort?: () => void;
+  /**
+   * Renders the control as a link to the same page with different sort
+   * parameters, instead of a button.
+   *
+   * Preferred wherever the sort lives in the URL. A button needs client state,
+   * which means the sort is lost on reload, cannot be linked to a colleague,
+   * and does not exist at all until JavaScript runs. A link is a real
+   * navigation the server answers — and it keeps the table a server component.
+   */
+  href?: string;
   children: ReactNode;
   className?: string;
 }) {
   const nextLabel =
     direction === "asc" ? "descending" : "ascending";
+
+  const label = `Sort by ${String(children)}, ${nextLabel}`;
+  const controlClassName = cn(
+    "eyebrow inline-flex cursor-pointer items-center gap-1",
+    "transition-colors duration-200 ease-standard hover:text-ink",
+    direction && "text-ink",
+    numeric && "w-full justify-end",
+  );
+
+  if (href) {
+    return (
+      <th
+        scope="col"
+        aria-sort={
+          direction === "asc"
+            ? "ascending"
+            : direction === "desc"
+              ? "descending"
+              : "none"
+        }
+        className={cn("eyebrow px-tight py-tight first:pl-0 last:pr-0", className)}
+      >
+        <Link href={href} aria-label={label} className={controlClassName}>
+          {children}
+          {direction && (
+            <Icon name={direction === "asc" ? "arrowUp" : "arrowDown"} size={12} />
+          )}
+        </Link>
+      </th>
+    );
+  }
 
   return (
     <th
@@ -218,13 +260,8 @@ export function SortableTh({
         onClick={onSort}
         // The visible label is the column name; the sort action needs to say
         // what pressing it will do, not restate the heading.
-        aria-label={`Sort by ${String(children)}, ${nextLabel}`}
-        className={cn(
-          "eyebrow inline-flex cursor-pointer items-center gap-1",
-          "transition-colors duration-200 ease-standard hover:text-ink",
-          direction && "text-ink",
-          numeric && "w-full justify-end",
-        )}
+        aria-label={label}
+        className={controlClassName}
       >
         {children}
         {/* Only the active column shows an arrow. An arrow on every header is
