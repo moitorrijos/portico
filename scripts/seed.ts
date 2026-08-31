@@ -53,6 +53,15 @@ const rng = createRng(DEMO_SEED);
 
 const MONTHS_OF_HISTORY = 18;
 
+/**
+ * One timestamp for the whole run.
+ *
+ * Read once rather than per row so every date in a single seed is consistent
+ * with every other -- and so nothing can be stamped a few milliseconds in the
+ * future relative to a row written earlier in the same loop.
+ */
+const NOW = new Date();
+
 /** Start of the month, `n` months before now. */
 function monthsAgo(n: number): Date {
   const d = new Date();
@@ -292,25 +301,44 @@ async function main() {
       const dueDate = monthsAgo(m);
       const isCurrentMonth = m === 0;
 
-      // ~86% on time, ~10% late, ~4% still outstanding.
+      // The three statuses mean distinct things, and conflating two of them
+      // was a real bug: PAID is on time, LATE is *paid after the due date*
+      // (so it still has a paidAt), and DUE is genuinely outstanding.
+      //
+      // How much can be outstanding depends on how old the month is, and that
+      // is the part that has to be right. A flat 4%-never-paid across eighteen
+      // months leaves rent unpaid since early last year -- the dashboard then
+      // reports "548 days late", which says nobody was ever evicted and reads
+      // as broken data rather than as a struggling tenant. Debt ages out:
+      // recent months carry the arrears, old months are settled.
       const roll = rng.next();
       let status: "PAID" | "LATE" | "DUE";
       let paidAt: Date | null;
 
-      if (isCurrentMonth) {
-        // The current month is mostly still open, which is what makes the
-        // dashboard's "collected this month" figure interesting.
-        status = rng.chance(0.55) ? "PAID" : "DUE";
-        paidAt = status === "PAID" ? addDays(dueDate, rng.int(0, 4)) : null;
-      } else if (roll < 0.86) {
-        status = "PAID";
-        paidAt = addDays(dueDate, rng.int(-3, 2));
-      } else if (roll < 0.96) {
-        status = "LATE";
-        paidAt = addDays(dueDate, rng.int(6, 24));
-      } else {
+      // Share of rent still unpaid, by how many months ago it was due.
+      const outstandingChance =
+        m === 0 ? 0.06 : m === 1 ? 0.04 : m === 2 ? 0.02 : 0;
+      // Share paid, but after the due date.
+      const lateChance = isCurrentMonth ? 0.12 : 0.1;
+
+      if (roll < outstandingChance) {
         status = "DUE";
         paidAt = null;
+      } else if (roll < outstandingChance + lateChance) {
+        status = "LATE";
+        // Capped at today: a payment cannot have been received in the future,
+        // which is what an uncapped +24 days does to the current month.
+        const late = addDays(dueDate, rng.int(6, 24));
+        paidAt = late > NOW ? NOW : late;
+        // If the grace period has not elapsed yet it is not late, just open.
+        if (late > NOW && dueDate > addDays(NOW, -6)) {
+          status = "DUE";
+          paidAt = null;
+        }
+      } else {
+        status = "PAID";
+        paidAt = addDays(dueDate, rng.int(-3, 2));
+        if (paidAt > NOW) paidAt = NOW;
       }
 
       await db.payment.create({
