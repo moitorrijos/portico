@@ -82,3 +82,74 @@ export type ManagerRequestDTO = Omit<ResidentRequestDTO, "notes"> & {
   assigneeName: string | null;
   notes: ManagerRequestNoteDTO[];
 };
+
+/* ---------------------------------------------------------------------------
+   Manager surfaces
+   --------------------------------------------------------------------------- */
+
+/**
+ * One month of a single series. `month` is the first instant of the month, so
+ * the chart can format the label itself rather than receiving a pre-formatted
+ * string it cannot re-format for a different breakpoint.
+ */
+export type MonthPointDTO = {
+  month: Date;
+  valueCents: number;
+};
+
+export type CommunityOccupancyDTO = {
+  id: string;
+  name: string;
+  occupied: number;
+  total: number;
+  /** 0–1. Pre-divided here so no component re-implements the guard on total=0. */
+  ratio: number;
+};
+
+export type ManagerOverviewDTO = {
+  occupancy: {
+    occupied: number;
+    total: number;
+    ratio: number;
+    vacant: number;
+    maintenance: number;
+    reserved: number;
+  };
+  byCommunity: CommunityOccupancyDTO[];
+  rentCollected: MonthPointDTO[];
+  collectedThisMonthCents: number;
+  billedThisMonthCents: number;
+  /** Collected ÷ billed for the current month. Drives the collection meter. */
+  collectionRatio: number;
+  /** Month-over-month change, as a ratio for formatDelta. */
+  collectedDelta: number;
+  openRequestCount: number;
+  urgentRequestCount: number;
+  openedDelta: number;
+  averageResolutionDays: number;
+};
+
+/** A row in the overview's "needs attention" lists. */
+export type RequestSummaryDTO = {
+  id: string;
+  title: string;
+  category: string;
+  priority: "LOW" | "NORMAL" | "URGENT";
+  status: "NEW" | "SCHEDULED" | "IN_PROGRESS" | "RESOLVED";
+  createdAt: Date;
+  unitLabel: string;
+  communityName: string;
+  residentName: string;
+};
+
+export type LatePaymentDTO = {
+  id: string;
+  amountCents: number;
+  dueDate: Date;
+  unitLabel: string;
+  communityName: string;
+  residentName: string;
+  /** Whole days past due, computed server-side so the number cannot differ
+   *  between the server render and a client re-render at a clock boundary. */
+  daysLate: number;
+};
